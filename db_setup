@@ -4,5 +4,5 @@ CREATE TABLE if not exists replies(cmd_id INTEGER, id INTEGER, active INTEGER, h
 CREATE UNIQUE INDEX if not exists reply_idx0 on replies(cmd_id, id, active, has_arg)
 CREATE        INDEX if not exists reply_idx1 on replies(cmd_id, tag, active)
 CREATE TABLE if not exists cmd_alias(id INTEGER PRIMARY KEY AUTOINCREMENT, cmd TEXT, p_cmd_id INTEGER, active INTERGER)
-CREATE UNIQUE INDEX if not exists alias_idx0 on replies(cmd)
-CREATE INDEX if not exists alias_idx1 on replies(p_cmd_id)
+CREATE UNIQUE INDEX if not exists alias_idx0 on cmd_alias(cmd)
+CREATE INDEX if not exists alias_idx1 on cmd_alias(p_cmd_id)

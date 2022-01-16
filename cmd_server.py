@@ -24,12 +24,20 @@ except:
     raise
 
 
+class REPLY_TYPE:
+    PIC_MD5 = 1
+    PIC_PATH = 2
+    TEXT = 3
+
+
 class reply_server:
 
     def __init__(self):
         self.db = cmdDB()
         self.cmd_info = cmdInfo()
         self.cur_dir = ''
+        self.reply = ""
+        self.reply_type = 0
         
     def checkout(self, name, cmd_type=0, create=False):
         self.cmd_info = self.db.get_cmd_info(name)
@@ -50,26 +58,38 @@ class reply_server:
         return True
 
     def handle_save_cmd(self, cmd):
-        if re.match("^pic.{1,}"):  # should be handled by session
+        logger.debug('saving {}'.format(cmd))
+        if re.match("^pic.{1,}", cmd):  # should be handled by session
             return
-        elif re.match("txt.{1,}"):  # save TEXT reply
+        elif re.match("txt.{1,}", cmd):  # save TEXT reply
             return self.save_text_reply(cmd[3:])
-        elif re.match("ftxt.{1,}"):  # save format TEXT reply
+        elif re.match("ftxt.{1,}", cmd):  # save format TEXT reply
             return self.save_ftext_reply(cmd[4:])
 
     def handle_cmd(self, ctx):
+        self.reply_type = 0
+        self.reply = ""
+        
         if re.match("^_save.{1,}", ctx.Content):
             return self.handle_save_cmd(ctx.Content[5:])
 
         arg = ""
+        checkout_good = False
         content = ctx.Content.strip()
-        cmd_len = len(self.cmd_info.cmd)
-        arg = content[cmd_len:]
-        arg = arg.strip()
+        space_index = content.find(' ')
+        if space_index == -1:
+            checkout_good = self.checkout(content)
+        else:
+            cmd = content[0:space_index]
+            checkout_good = self.checkout(cmd)
+            arg = content[space_index:]
+            arg = arg.strip()
+        if not checkout_good:
+            return
 
         msg_type = self.cmd_info.type
         if msg_type == CMD_TYPE.PIC:
-            self.random_pic_md5(arg)
+            self.random_pic_path(arg)
         elif msg_type == CMD_TYPE.TEXT_TAG or msg_type == CMD_TYPE.TEXT_FORMAT:
             self.random_reply(arg)
 
@@ -91,8 +111,10 @@ class reply_server:
         if reply_info and self.cmd_info.type == CMD_TYPE.TEXT_FORMAT and reply_info.has_arg:
             reply_info.reply = reply_info.reply.format(arg)
         if reply_info:
-            self.db.used_inc(self.cmd_info.id, reply_info.id)
-            Text(reply_info.reply)
+            logger.debug("inc{},{}".format(reply_info.cmd_id, reply_info.id))
+            self.db.used_inc(reply_info.cmd_id, reply_info.id)
+            self.reply = reply_info.reply
+            self.reply_type = REPLY_TYPE.TEXT
 
     def random_pic(self, tag):
         if self.cmd_info.sequence == 0:
@@ -117,18 +139,20 @@ class reply_server:
     def random_pic_md5(self, tag):
         pic_info = self.random_pic(tag)
         if pic_info:
-            Picture(pic_md5=pic_info.md5)
+            self.reply=pic_info.md5
+            self.reply_type = REPLY_TYPE.PIC_MD5
 
-    def random_pic_path(self):
-        pic_info = self.random_pic()
+    def random_pic_path(self, tag):
+        pic_info = self.random_pic(tag)
         if pic_info:
-            file_name = '{}.{}'.format(pic_info.md5, pic_info.type)
+            file_name = '{}.{}'.format(pic_info.md5, pic_info.file_type)
             file_name = file_name.replace('/', 'SLASH') #avoid path revolving issue
             file_name = os.path.join(self.cur_dir,file_name)
-            Picture(pic_path=file_name.md5)
+            self.reply=file_name
+            self.reply_type = REPLY_TYPE.PIC_PATH
 
     @staticmethod
-    def find_imgtype(self, type_str):
+    def find_imgtype(type_str):
         prefix = 'image/'
         img_type = None
         index = type_str.find(prefix)
@@ -136,7 +160,7 @@ class reply_server:
             img_type = type_str[len(prefix):]
         return img_type
 
-    def save_pic(self, pic: PicObj, tag, reply):
+    def save_pic(self, pic: PicObj, tag="", reply=""):
 
         if pic.Url:
             try:
@@ -152,7 +176,7 @@ class reply_server:
                 logger.warning('Saving image to: {}'.format(file_path))
                 with open(file_path, 'wb') as img:
                     img.write(res.content)
-                self.db.add_pic(self.cmd_info.id, self.cmd_info.sequence,  pic.Md5, img_type)
+                self.db.add_pic(self.cmd_info.id, self.cmd_info.sequence, pic.Md5, img_type, CMD_TYPE.PIC)
                 self.db.set_cmd_seq(self.cmd_info.id, self.cmd_info.sequence)
                 return True
             except Exception as e:
@@ -162,7 +186,7 @@ class reply_server:
         return False
 
     @staticmethod
-    def save_cmd_parse(self, cmd):
+    def save_cmd_parse(cmd):
         cmd = cmd.strip()
         arg = ""
         reply = ""
@@ -182,12 +206,15 @@ class reply_server:
         return cmd, arg, reply
 
     def save_text_reply(self, cmd):
+        logger.debug('saving {}'.format(cmd))
         cmd, tag, reply = self.save_cmd_parse(cmd)
         if len(cmd) and len(reply):
             self.checkout(cmd, cmd_type=CMD_TYPE.TEXT_TAG, create=True)
             self.cmd_info.sequence += 1
             self.db.add_reply(self.cmd_info.id, self.cmd_info.sequence, has_arg=0, tag=tag, type=CMD_TYPE.TEXT_TAG,reply=reply)
-            self.db.set_cmd_seq(self.cmd_info.id, self.cmd_info.sequence)
+            self.db.set_cmd_seq(self.cmd_info.id, self.cmd_info.sequence) 
+            self.reply_type = REPLY_TYPE.TEXT
+            self.reply = "回复存储成功，{}({}):{}".format(cmd,tag,reply)
 
     def save_ftext_reply(self, cmd):
         cmd, arg, reply = self.save_cmd_parse(cmd)
@@ -196,6 +223,8 @@ class reply_server:
             self.cmd_info.sequence += 1
             self.db.add_reply(self.cmd_info.id, self.cmd_info.sequence, has_arg=1, tag="", type=CMD_TYPE.TEXT_FORMAT,reply=reply)
             self.db.set_cmd_seq(self.cmd_info.id, self.cmd_info.sequence)
+            self.reply_type = REPLY_TYPE.TEXT
+            self.reply = "定形回复存储成功，{}({}):{}".format(cmd,arg,reply)
 
 
 

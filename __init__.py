@@ -1,10 +1,10 @@
 from botoy import MsgTypes, S, GroupMsg, FriendMsg
-from botoy.sugar import Picture
+from botoy.sugar import Picture, Text
 from botoy.parser import friend, group
 from botoy.decorators import  ignore_botself
 from botoy.session import SessionHandler, session, FILTER_SUCCESS, ctx
 import re
-from .cmd_server import reply_server, PicObj
+from .cmd_server import reply_server, PicObj, REPLY_TYPE
 from .cmd_dbi import CMD_TYPE
 import time
 
@@ -40,7 +40,7 @@ def _par(ctx):
 
 @l_session.handle
 def _h():
-    prefix = 'save_'
+    prefix = '_savepic'
     cmd = ctx.Content[len(prefix):]
     if l_reply_server.checkout(cmd, cmd_type=CMD_TYPE.PIC, create = True):
         session.send_text('开启{}存储模式，请发送图片'.format(cmd))
@@ -80,6 +80,13 @@ def main(ctx):
     l_session.message_receiver(ctx)
     if not l_session.sc.session_existed(ctx, True):
         l_reply_server.handle_cmd(ctx)
+        reply_type = l_reply_server.reply_type
+        if reply_type == REPLY_TYPE.PIC_MD5:
+            Picture(pic_md5=l_reply_server.reply)
+        elif reply_type == REPLY_TYPE.PIC_PATH:
+            Picture(pic_path=l_reply_server.reply)
+        elif reply_type == REPLY_TYPE.TEXT:
+            Text(l_reply_server.reply)
 
 
 receive_group_msg=receive_friend_msg=main
