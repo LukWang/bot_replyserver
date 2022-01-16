@@ -20,9 +20,8 @@ class CMD_TYPE:
     VOICE = 4
 
 
-
 class cmdInfo:
-    id: int
+    cmd_id: int
     cmd: str
     type: int
     active: int
@@ -31,7 +30,7 @@ class cmdInfo:
 
 class picInfo:
     cmd_id: int
-    id: int
+    reply_id: int
     active: int
     tag: str
     type: str
@@ -43,7 +42,7 @@ class picInfo:
 
 class replyInfo:
     cmd_id: int
-    id: int
+    reply_id: int
     active: int
     has_arg: int
     tag: str
@@ -53,7 +52,7 @@ class replyInfo:
 
 
 class aliasInfo:
-    id: int
+    cmd_id: int
     cmd: str
     p_cmd_id: int
     active: int
@@ -70,7 +69,7 @@ class cmdDB:
         row = self.db.fetchone()
         if row:
             cmd_info = cmdInfo()
-            cmd_info.id = row[0]
+            cmd_info.cmd_id = row[0]
             cmd_info.cmd = name
             cmd_info.type = row[1]
             cmd_info.active = row[2]
@@ -82,39 +81,39 @@ class cmdDB:
         self.db.execute('insert into cmd_collection(cmd, type, active, amount) values(?, ?, 1, 0)', (cmd, type))
         self.conn.commit()
 
-    def inc_cmd_seq(self, id, amount):
-        self.db.execute('update cmd_collection set amount = amount + ? where id = ?', (amount, id))
+    def inc_cmd_seq(self, cmd_id, amount):
+        self.db.execute('update cmd_collection set amount = amount + ? where id = ?', (amount, cmd_id))
         self.conn.commit()
 
-    def set_cmd_seq(self, id, amount):
-        self.db.execute('update cmd_collection set amount = ? where id = ?',(amount, id))
+    def set_cmd_seq(self, cmd_id, amount):
+        self.db.execute('update cmd_collection set amount = ? where id = ?',(amount, cmd_id))
         self.conn.commit()
 
-    def set_cmd_active(self, id, active):
-        self.db.execute('update cmd_collection set active = ? where id = ?',(active, id))
+    def set_cmd_active(self, cmd_id, active):
+        self.db.execute('update cmd_collection set active = ? where id = ?',(active, cmd_id))
         self.conn.commit()
 
     # reply operation
-    def add_pic(self, cmd_id, id, md5, file_type, type, tag="", reply=""):
+    def add_pic(self, cmd_id, reply_id, md5, file_type, type, tag="", reply=""):
         self.db.execute('insert into replies(cmd_id, id, active, has_arg, tag, type, hash, file_type, reply, stamp, time_used) '
                                       'values(?,      ?,  1,      0,      ?,   ?,    ?,    ?,         ?,     DATE("now"),0)',
-                                             (cmd_id, id,                 tag, type, md5,  file_type, reply))
+                                             (cmd_id, reply_id,                 tag, type, md5,  file_type, reply))
         self.conn.commit()
 
-    def add_reply(self, cmd_id, id, has_arg, tag, type, reply):
+    def add_reply(self, cmd_id, reply_id, has_arg, tag, type, reply):
         self.db.execute('insert into replies(cmd_id, id, active, has_arg, tag, type, hash, file_type, reply, stamp, time_used) '
                                       'values(?,      ?,  1,     ?,       ?,   ?,    " ",  " ",       ?,     DATE("now"),0)',
-                                             (cmd_id, id,        has_arg, tag, type,                  reply))
+                                             (cmd_id, reply_id,        has_arg, tag, type,                  reply))
         self.conn.commit()
 
-    def get_pic(self, cmd_id, id):
+    def get_pic(self, cmd_id, reply_id):
         pic_info = None
-        self.db.execute('select hash, file_type, active, tag, reply, time_used from replies where cmd_id = ? and id = ?', (cmd_id, id))
+        self.db.execute('select hash, file_type, active, tag, reply, time_used from replies where cmd_id = ? and id = ?', (cmd_id, reply_id))
         row = self.db.fetchone()
         if row:
             pic_info = picInfo()
             pic_info.cmd_id = cmd_id
-            pic_info.id = id
+            pic_info.reply_id = reply_id
             pic_info.type = CMD_TYPE.PIC
             pic_info.md5 = row[0]
             pic_info.file_type = row[1]
@@ -126,29 +125,29 @@ class cmdDB:
 
     def get_pic_by_tag(self, cmd_id, tag):
         pic_info = None
-        self.db.execute("select hash, file_type, active, tag, reply, time_used from replies where cmd_id = ? and tag like '" + tag + "%' order by time_used", (cmd_id,))
+        self.db.execute("select id, hash, file_type, active, tag, reply, time_used from replies where cmd_id = ? and tag like '" + tag + "%' order by time_used", (cmd_id,))
         row = self.db.fetchone()
         if row:
             pic_info = picInfo()
             pic_info.cmd_id = cmd_id
-            pic_info.id = id
+            pic_info.reply_id = row[0]
             pic_info.type = CMD_TYPE.PIC
-            pic_info.md5 = row[0]
-            pic_info.file_type = row[1]
-            pic_info.active = row[2]
-            pic_info.tag = row[3]
-            pic_info.reply = row[4]
-            pic_info.time_used = row[5]
+            pic_info.md5 = row[1]
+            pic_info.file_type = row[2]
+            pic_info.active = row[3]
+            pic_info.tag = row[4]
+            pic_info.reply = row[5]
+            pic_info.time_used = row[6]
         return pic_info
 
-    def get_reply(self, cmd_id, id):
+    def get_reply(self, cmd_id, reply_id):
         reply_info = None
-        self.db.execute("select has_arg, active, type, tag, reply, time_used from replies where cmd_id = ? and id = ?", (cmd_id, id))
+        self.db.execute("select has_arg, active, type, tag, reply, time_used from replies where cmd_id = ? and id = ?", (cmd_id, reply_id))
         row = self.db.fetchone()
         if row:
             reply_info = replyInfo()
             reply_info.cmd_id = cmd_id
-            reply_info.id = id
+            reply_info.reply_id = reply_id
             reply_info.has_arg = row[0]
             reply_info.active = row[1]
             reply_info.type = row[2]
@@ -159,22 +158,22 @@ class cmdDB:
 
     def get_reply_by_tag(self, cmd_id, tag):
         reply_info = None
-        self.db.execute("select has_arg, active, type, tag, reply, time_used from replies where cmd_id = ? and tag like '" + tag + "%' order by time_used", (cmd_id,))
+        self.db.execute("select id, has_arg, active, type, tag, reply, time_used from replies where cmd_id = ? and tag like '" + tag + "%' order by time_used", (cmd_id,))
         row = self.db.fetchone()
         if row:
             reply_info = replyInfo()
             reply_info.cmd_id = cmd_id
-            reply_info.id = id
-            reply_info.has_arg = row[0]
-            reply_info.active = row[1]
-            reply_info.type = row[2]
-            reply_info.tag = row[3]
-            reply_info.reply = row[4]
-            reply_info.time_used = row[5]
+            reply_info.reply_id = row[0]
+            reply_info.has_arg = row[1]
+            reply_info.active = row[2]
+            reply_info.type = row[3]
+            reply_info.tag = row[4]
+            reply_info.reply = row[5]
+            reply_info.time_used = row[6]
         return reply_info
     
-    def used_inc(self, cmd_id, id):
-        self.db.execute('update replies set time_used = time_used + 1 where cmd_id = ? and id = ?', (cmd_id, id))
+    def used_inc(self, cmd_id, reply_id):
+        self.db.execute('update replies set time_used = time_used + 1 where cmd_id = ? and id = ?', (cmd_id, reply_id))
         self.conn.commit()
 
     # alias operations

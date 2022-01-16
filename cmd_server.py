@@ -96,7 +96,7 @@ class reply_server:
     def random_reply(self, arg):
         reply_info = None
         if self.cmd_info.type == CMD_TYPE.TEXT_TAG and len(arg):
-            reply_info = self.db.get_reply_by_tag(self.cmd_info.id, arg)
+            reply_info = self.db.get_reply_by_tag(self.cmd_info.cmd_id, arg)
         else:
             random_lim = 5
             reply_id = 0
@@ -105,14 +105,14 @@ class reply_server:
                 if random_lim == 0:
                     break
                 reply_id = random.randint(1, self.cmd_info.sequence)
-                logger.debug('getting with{}:{}'.format(self.cmd_info.id, reply_id))
-                reply_info = self.db.get_reply(self.cmd_info.id, reply_id)
+                logger.debug('getting with{}:{}'.format(self.cmd_info.cmd_id, reply_id))
+                reply_info = self.db.get_reply(self.cmd_info.cmd_id, reply_id)
 
         if reply_info and self.cmd_info.type == CMD_TYPE.TEXT_FORMAT and reply_info.has_arg:
             reply_info.reply = reply_info.reply.format(arg)
         if reply_info:
-            logger.debug("inc{},{}".format(reply_info.cmd_id, reply_info.id))
-            self.db.used_inc(reply_info.cmd_id, reply_info.id)
+            logger.debug("inc{},{}".format(reply_info.cmd_id, reply_info.reply_id))
+            self.db.used_inc(reply_info.cmd_id, reply_info.reply_id)
             self.reply = reply_info.reply
             self.reply_type = REPLY_TYPE.TEXT
 
@@ -128,11 +128,11 @@ class reply_server:
             if random_lim == 0:
                 break
             pic_id = random.randint(1, self.cmd_info.sequence)
-            logger.debug('getting with{}:{}'.format(self.cmd_info.id, pic_id))
-            pic_info = self.db.get_pic(self.cmd_info.id, pic_id)
+            logger.debug('getting with{}:{}'.format(self.cmd_info.cmd_id, pic_id))
+            pic_info = self.db.get_pic(self.cmd_info.cmd_id, pic_id)
 
         if pic_info and pic_id:
-            self.db.used_inc(self.cmd_info.id, pic_id)
+            self.db.used_inc(self.cmd_info.cmd_id, pic_id)
 
         return pic_info
 
@@ -169,15 +169,15 @@ class reply_server:
                 img_type = self.find_imgtype(res.headers['content-type'])
                 if not img_type:
                     raise Exception('Failed to resolve image type')
-                self.cmd_info.id += 1;
+                self.cmd_info.sequence += 1;
                 file_name = '{}.{}'.format(pic.Md5, img_type)
                 file_name = file_name.replace('/', 'SLASH') #avoid path revolving issue
                 file_path = os.path.join(self.cur_dir, file_name)
                 logger.warning('Saving image to: {}'.format(file_path))
                 with open(file_path, 'wb') as img:
                     img.write(res.content)
-                self.db.add_pic(self.cmd_info.id, self.cmd_info.sequence, pic.Md5, img_type, CMD_TYPE.PIC)
-                self.db.set_cmd_seq(self.cmd_info.id, self.cmd_info.sequence)
+                self.db.add_pic(self.cmd_info.cmd_id, self.cmd_info.sequence, pic.Md5, img_type, CMD_TYPE.PIC)
+                self.db.set_cmd_seq(self.cmd_info.cmd_id, self.cmd_info.sequence)
                 return True
             except Exception as e:
                 logger.warning('Failed to get picture from url:{},{}'.format(pic.Url, e))
@@ -211,8 +211,8 @@ class reply_server:
         if len(cmd) and len(reply):
             self.checkout(cmd, cmd_type=CMD_TYPE.TEXT_TAG, create=True)
             self.cmd_info.sequence += 1
-            self.db.add_reply(self.cmd_info.id, self.cmd_info.sequence, has_arg=0, tag=tag, type=CMD_TYPE.TEXT_TAG,reply=reply)
-            self.db.set_cmd_seq(self.cmd_info.id, self.cmd_info.sequence) 
+            self.db.add_reply(self.cmd_info.cmd_id, self.cmd_info.sequence, has_arg=0, tag=tag, type=CMD_TYPE.TEXT_TAG,reply=reply)
+            self.db.set_cmd_seq(self.cmd_info.cmd_id, self.cmd_info.sequence)
             self.reply_type = REPLY_TYPE.TEXT
             self.reply = "回复存储成功，{}({}):{}".format(cmd,tag,reply)
 
@@ -221,8 +221,8 @@ class reply_server:
         if len(cmd) and len(reply):
             self.checkout(cmd, cmd_type=CMD_TYPE.TEXT_FORMAT, create=True)
             self.cmd_info.sequence += 1
-            self.db.add_reply(self.cmd_info.id, self.cmd_info.sequence, has_arg=1, tag="", type=CMD_TYPE.TEXT_FORMAT,reply=reply)
-            self.db.set_cmd_seq(self.cmd_info.id, self.cmd_info.sequence)
+            self.db.add_reply(self.cmd_info.cmd_id, self.cmd_info.sequence, has_arg=1, tag="", type=CMD_TYPE.TEXT_FORMAT,reply=reply)
+            self.db.set_cmd_seq(self.cmd_info.cmd_id, self.cmd_info.sequence)
             self.reply_type = REPLY_TYPE.TEXT
             self.reply = "定形回复存储成功，{}({}):{}".format(cmd,arg,reply)
 
