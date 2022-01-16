@@ -4,17 +4,21 @@ from botoy.parser import friend, group
 from botoy.decorators import  ignore_botself
 from botoy.session import SessionHandler, session, FILTER_SUCCESS, ctx
 import re
-from .pic_server import pic_server, PicObj
+from .cmd_server import reply_server, PicObj
+from .cmd_dbi import CMD_TYPE
 import time
 
 __doc__ = """图片存储助手"""
 
+
 def session_filter(ctx):
-    if re.match('^save_.{1,}',ctx.Content):
+    if re.match('^_savepic.{1,}',ctx.Content):
         return FILTER_SUCCESS
 
+
 l_session = SessionHandler(ignore_botself, session_filter, single_user=True, expiration = 30)
-l_pic_server = pic_server()
+l_reply_server = reply_server()
+
 
 @l_session.parse
 def _par(ctx):
@@ -33,16 +37,15 @@ def _par(ctx):
 
     return pic_obj
         
-     
 
 @l_session.handle
 def _h():
     prefix = 'save_'
-    cate = ctx.Content[len(prefix):]
-    if l_pic_server.checkout(cate, create = True):
-        session.send_text('开启{}存储模式，请发送图片'.format(cate))
+    cmd = ctx.Content[len(prefix):]
+    if l_reply_server.checkout(cmd, cmd_type=CMD_TYPE.PIC, create = True):
+        session.send_text('开启{}存储模式，请发送图片'.format(cmd))
     else:
-        session.send_text('访问{}图片仓库失败'.format(cate))
+        session.send_text('访问{}图片仓库失败'.format(cmd))
         l_session.finish()
         return
    
@@ -53,13 +56,13 @@ def _h():
             session.send_text('因对方无响应，存储模式关闭')
             l_session.finish()
             break
-        item = session.pop('pic', wait = True, timeout = 1.0)
+        item = session.pop('pic', wait = True, timeout=1)
         if not item:
             continue
         
         last = time.monotonic()
         if isinstance(item, PicObj):
-            ret = l_pic_server.save_pic(item)
+            ret = l_reply_server.save_pic(item)
             if not ret:
                 session.send_text('保存图片失败')
             else:
@@ -71,24 +74,12 @@ def _h():
         else:
             session.send_text('无效参数')
 
-        
-
 
 @ignore_botself
 def main(ctx):
     l_session.message_receiver(ctx)
     if not l_session.sc.session_existed(ctx, True):
-        try_send_pic(ctx)
-
-def try_send_pic(ctx):
-    if l_pic_server.checkout(ctx.Content):
-        #file_name = l_pic_server.random_pic_path()
-        file_name = l_pic_server.random_pic_md5()
-        file_name = file_name.strip()        
-        print(file_name)
-        Picture(pic_md5 = file_name)
-        #Sender = S.bind(ctx)
-        #Sender.image(file_name, type=S.TYPE_PATH)
+        l_reply_server.handle_cmd(ctx)
 
 
 receive_group_msg=receive_friend_msg=main
