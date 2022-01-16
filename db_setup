@@ -1,0 +1,7 @@
+CREATE TABLE if not exists reply_collection(id INTEGER PRIMARY KEY AUTOINCREMENT, cmd TEXT, type INTEGER, amount INTEGER)
+CREATE UNIQUE INDEX if not exists cmd_idx on reply_collection(cmd)
+CREATE TABLE if not exists replies(cmd_id INTEGER, id INTEGER, active INTEGER, has_arg INTEGER, type INTERGER, hash VARCHAR(30), file_type VARCHAR(10), reply TEXT, stamp DATE, time_used INTEGER)
+CREATE UNIQUE INDEX if not exists reply_idx on replies(cmd_id, id, active, has_arg)
+CREATE TABLE if not exists cmd_alias(id INTEGER PRIMARY KEY AUTOINCREMENT, cmd TEXT, p_cmd_id INTEGER)
+CREATE UNIQUE INDEX if not exists alias_idx0 on replies(cmd)
+CREATE INDEX if not exists alias_idx1 on replies(p_cmd_id)
