@@ -1,5 +1,6 @@
 import sqlite3
 import os, json
+import re
 
 db_schema = ''
 try:
@@ -17,6 +18,8 @@ try:
     with open('db_setup', 'r', encoding='utf-8') as f:
         for line in f.readlines():
             line = line.strip()
+            if re.match("^#.*", line):
+                continue
             print('Executing: ', line)
             cur.execute(line)
 except:

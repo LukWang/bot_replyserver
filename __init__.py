@@ -1,7 +1,7 @@
 from botoy import MsgTypes, S, GroupMsg, FriendMsg
 from botoy.sugar import Picture, Text
 from botoy.parser import friend, group
-from botoy.decorators import  ignore_botself
+from botoy.decorators import ignore_botself
 from botoy.session import SessionHandler, session, FILTER_SUCCESS, ctx
 import re
 from .cmd_server import reply_server, PicObj, REPLY_TYPE
@@ -28,10 +28,12 @@ def _par(ctx):
     pic_obj = PicObj()
     if isinstance(ctx, FriendMsg):
         pics = friend.pic(ctx)
+        pic_obj.user = ctx.FromUin
         pic_obj.Url = pics.FriendPic[0].Url
         pic_obj.Md5 = pics.FriendPic[0].FileMd5
     elif isinstance(ctx, GroupMsg):
         pics = group.pic(ctx)
+        pic_obj.user = ctx.FromUserId
         pic_obj.Url = pics.GroupPic[0].Url
         pic_obj.Md5 = pics.GroupPic[0].FileMd5
 

@@ -16,8 +16,8 @@ except:
 class CMD_TYPE:
     PIC = 1
     TEXT_TAG = 2
-    TEXT_FORMAT = 3
-    VOICE = 4
+    TEXT_FORMAT = 4
+    VOICE = 8
 
 
 class cmdInfo:
@@ -63,14 +63,23 @@ class cmdDB:
         self.conn = sqlite3.connect(db_schema, check_same_thread=False)
         self.db = self.conn.cursor()
 
-    def get_cmd_info(self, name):
+    def get_cmd_info(self, cmd_id = None, cmd = None):
         cmd_info = None
-        self.db.execute('select id, type, active, amount from cmd_collection where cmd = ?', (name,))
+        if cmd_id:
+            self.db.execute('select id, type, active, amount, cmd from cmd_collection where id = ?', (cmd_id,))
+        elif cmd:
+            self.db.execute('select id, type, active, amount from cmd_collection where cmd = ?', (cmd,))
+        else:
+            return None
+
         row = self.db.fetchone()
         if row:
             cmd_info = cmdInfo()
             cmd_info.cmd_id = row[0]
-            cmd_info.cmd = name
+            if cmd:
+                cmd_info.cmd = cmd
+            else:
+                cmd_info.cmd = row[4]
             cmd_info.type = row[1]
             cmd_info.active = row[2]
             cmd_info.sequence = row[3]
@@ -79,6 +88,14 @@ class cmdDB:
 
     def add_cmd(self, cmd, type):
         self.db.execute('insert into cmd_collection(cmd, type, active, amount) values(?, ?, 1, 0)', (cmd, type))
+        self.conn.commit()
+
+    def disable_cmd(self, cmd_id, active):
+        self.db.execute('update cmd_collection set active = ?  where id = ?', (active, cmd_id))
+        self.conn.commit()
+
+    def set_cmd_type(self, cmd_id, type):
+        self.db.execute('update cmd_collection set type = ? where id = ?', (type, cmd_id))
         self.conn.commit()
 
     def inc_cmd_seq(self, cmd_id, amount):
@@ -94,16 +111,16 @@ class cmdDB:
         self.conn.commit()
 
     # reply operation
-    def add_pic(self, cmd_id, reply_id, md5, file_type, type, tag="", reply=""):
-        self.db.execute('insert into replies(cmd_id, id, active, has_arg, tag, type, hash, file_type, reply, stamp, time_used) '
-                                      'values(?,      ?,  1,      0,      ?,   ?,    ?,    ?,         ?,     DATE("now"),0)',
-                                             (cmd_id, reply_id,                 tag, type, md5,  file_type, reply))
+    def add_pic(self, cmd_id, reply_id, md5, file_type, type, tag="", reply="", user_id = ""):
+        self.db.execute('insert into replies(cmd_id, id, active, has_arg, tag, type, hash, file_type, reply, stamp, time_used, user_id) '
+                                      'values(?,      ?,  1,      0,      ?,   ?,    ?,    ?,         ?,     DATE("now"),0,    ?)',
+                                             (cmd_id, reply_id,           tag, type, md5,  file_type, reply,                   user_id))
         self.conn.commit()
 
-    def add_reply(self, cmd_id, reply_id, has_arg, tag, type, reply):
-        self.db.execute('insert into replies(cmd_id, id, active, has_arg, tag, type, hash, file_type, reply, stamp, time_used) '
-                                      'values(?,      ?,  1,     ?,       ?,   ?,    " ",  " ",       ?,     DATE("now"),0)',
-                                             (cmd_id, reply_id,        has_arg, tag, type,                  reply))
+    def add_reply(self, cmd_id, reply_id, has_arg, tag, type, reply, user_id):
+        self.db.execute('insert into replies(cmd_id, id, active, has_arg, tag, type, hash, file_type, reply, stamp, time_used, user_id) '
+                                      'values(?,      ?,  1,     ?,       ?,   ?,    " ",  " ",       ?,     DATE("now"),0,    ?)',
+                                             (cmd_id, reply_id,  has_arg, tag, type,                  reply,                   user_id))
         self.conn.commit()
 
     def get_pic(self, cmd_id, reply_id):
@@ -178,9 +195,25 @@ class cmdDB:
 
     # alias operations
     def add_alias(self, new_cmd, parent):
-        self.db.execute("insert into cmd_alias(cmd, p_cmd_id, active)  values(?, ?, 1)", (new_cmd, parent))
+        self.db.execute("insert into cmd_alias(cmd, p_cmd_id, active) values(?, ?, 1) on conflict replace", (new_cmd, parent))
         self.conn.commit()
 
+    def make_parent(self, cmd):
+        self.db.execute("update cmd_alias set p_cmd_id = 0 where cmd = ?", (cmd, ))
+
+    def disable(self, cmd):
+        self.db.execute("update cmd_alias set active = 0 where cmd = ?", (cmd, ))
+
+    def get_real_cmd(self, cmd):
+        real_cmd_id = 0
+        self.db.execute("select id, p_cmd_id, active from cmd_alias where ", (cmd,))
+        row = self.db.fetchone()
+        while row and row[1] > 0 and row[2] != 0:
+            self.db.execute("select id, p_cmd_id, active from cmd_alias where ", (cmd,))
+            row = self.db.fetchone()
+        if row and row[2] > 0:
+            real_cmd_id = row[0]
+        return real_cmd_id
 
 
 

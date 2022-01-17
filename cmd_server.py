@@ -9,6 +9,7 @@ from .cmd_dbi import cmdDB, cmdInfo, replyInfo, aliasInfo, CMD_TYPE
 
 
 class PicObj():
+    user: str
     Url: str
     Md5: str
 
@@ -38,17 +39,19 @@ class reply_server:
         self.cur_dir = ''
         self.reply = ""
         self.reply_type = 0
+        self.user_id = ""
         
-    def checkout(self, name, cmd_type=0, create=False):
-        self.cmd_info = self.db.get_cmd_info(name)
-        self.cur_dir = os.path.join(pic_dir, name)
+    def checkout(self, cmd, cmd_type=0, create=False):
+        real_cmd_id = self.db.get_real_cmd(cmd)  #handle alias
+        self.cmd_info = self.db.get_cmd_info(cmd_id=real_cmd_id)
+        self.cur_dir = os.path.join(pic_dir, self.cmd_info.cmd)
         if not self.cmd_info:
             if create:
                 if not os.path.exists(self.cur_dir) and cmd_type == CMD_TYPE.PIC:
                     os.mkdir(self.cur_dir )
-                self.db.add_cmd(name, cmd_type)
-                self.db.add_alias(name, 0)
-                self.cmd_info = self.db.get_cmd_info(name)
+                self.db.add_cmd(cmd, cmd_type)
+                self.db.add_alias(cmd, 0)
+                self.cmd_info = self.db.get_cmd_info(cmd)
             else:
                 return False
 
@@ -61,21 +64,31 @@ class reply_server:
         logger.debug('saving {}'.format(cmd))
         if re.match("^pic.{1,}", cmd):  # should be handled by session
             return
-        elif re.match("txt.{1,}", cmd):  # save TEXT reply
+        elif re.match("^txt.{1,}", cmd):  # save TEXT reply
             return self.save_text_reply(cmd[3:])
-        elif re.match("ftxt.{1,}", cmd):  # save format TEXT reply
+        elif re.match("^ftxt.{1,}", cmd):  # save format TEXT reply
             return self.save_ftext_reply(cmd[4:])
+        elif re.match("^alias.{1,}", cmd):  # save alias
+            return self.save_alias(cmd[5:])
 
     def handle_cmd(self, ctx):
         self.reply_type = 0
         self.reply = ""
-        
+
+        if isinstance(ctx, FriendMsg):
+            self.user_id = ctx.FromUin
+        elif isinstance(ctx, GroupMsg):
+            self.user_id = ctx.FromUserId
+
         if re.match("^_save.{1,}", ctx.Content):
             return self.handle_save_cmd(ctx.Content[5:])
 
         arg = ""
         checkout_good = False
         content = ctx.Content.strip()
+        if len(content) > 1:
+            re.sub("[!?\uff1f\uff01]$", '', content)
+
         space_index = content.find(' ')
         if space_index == -1:
             checkout_good = self.checkout(content)
@@ -176,7 +189,7 @@ class reply_server:
                 logger.warning('Saving image to: {}'.format(file_path))
                 with open(file_path, 'wb') as img:
                     img.write(res.content)
-                self.db.add_pic(self.cmd_info.cmd_id, self.cmd_info.sequence, pic.Md5, img_type, CMD_TYPE.PIC)
+                self.db.add_pic(self.cmd_info.cmd_id, self.cmd_info.sequence, pic.Md5, img_type, CMD_TYPE.PIC, user_id=pic.user)
                 self.db.set_cmd_seq(self.cmd_info.cmd_id, self.cmd_info.sequence)
                 return True
             except Exception as e:
@@ -209,22 +222,35 @@ class reply_server:
         logger.debug('saving {}'.format(cmd))
         cmd, tag, reply = self.save_cmd_parse(cmd)
         if len(cmd) and len(reply):
-            self.checkout(cmd, cmd_type=CMD_TYPE.TEXT_TAG, create=True)
-            self.cmd_info.sequence += 1
-            self.db.add_reply(self.cmd_info.cmd_id, self.cmd_info.sequence, has_arg=0, tag=tag, type=CMD_TYPE.TEXT_TAG,reply=reply)
-            self.db.set_cmd_seq(self.cmd_info.cmd_id, self.cmd_info.sequence)
-            self.reply_type = REPLY_TYPE.TEXT
-            self.reply = "回复存储成功，{}({}):{}".format(cmd,tag,reply)
+            if self.checkout(cmd, cmd_type=CMD_TYPE.TEXT_TAG, create=True):
+                self.cmd_info.sequence += 1
+                self.db.add_reply(self.cmd_info.cmd_id, self.cmd_info.sequence, has_arg=0, tag=tag, type=CMD_TYPE.TEXT_TAG,reply=reply, user_id=self.user_id)
+                self.db.set_cmd_seq(self.cmd_info.cmd_id, self.cmd_info.sequence)
+                self.reply_type = REPLY_TYPE.TEXT
+                self.reply = "回复存储成功，{}({}):{}".format(cmd,tag,reply)
 
     def save_ftext_reply(self, cmd):
         cmd, arg, reply = self.save_cmd_parse(cmd)
         if len(cmd) and len(reply):
-            self.checkout(cmd, cmd_type=CMD_TYPE.TEXT_FORMAT, create=True)
-            self.cmd_info.sequence += 1
-            self.db.add_reply(self.cmd_info.cmd_id, self.cmd_info.sequence, has_arg=1, tag="", type=CMD_TYPE.TEXT_FORMAT,reply=reply)
-            self.db.set_cmd_seq(self.cmd_info.cmd_id, self.cmd_info.sequence)
-            self.reply_type = REPLY_TYPE.TEXT
-            self.reply = "定形回复存储成功，{}({}):{}".format(cmd,arg,reply)
+            if self.checkout(cmd, cmd_type=CMD_TYPE.TEXT_FORMAT, create=True):
+                self.cmd_info.sequence += 1
+                self.db.add_reply(self.cmd_info.cmd_id, self.cmd_info.sequence, has_arg=1, tag="", type=CMD_TYPE.TEXT_FORMAT,reply=reply, user_id=self.user_id)
+                self.db.set_cmd_seq(self.cmd_info.cmd_id, self.cmd_info.sequence)
+                self.reply_type = REPLY_TYPE.TEXT
+                self.reply = "定形回复存储成功，{}({}):{}".format(cmd,arg,reply)
+
+    def save_alias(self, cmd):
+        space_index = cmd.find(' ')
+        if space_index > 0:
+            p_cmd = cmd[space_index+1:]
+            p_cmd = p_cmd.strip()
+            cmd = cmd[0:space_index]
+            if self.checkout(p_cmd):
+                self.db.add_alias(cmd, self.cmd_info.cmd_id)
+                self.reply_type = REPLY_TYPE.TEXT
+                self.reply = "alias设置成功:{} to {}".format(cmd, p_cmd)
+
+
 
 
 
