@@ -44,8 +44,8 @@ class reply_server:
         self.cur_dir = os.path.join(pic_dir, name)
         if not self.cmd_info:
             if create:
-                if not os.path.exists(self.cur_dir):
-                    os.mkdir(self.cur_dir, 666)
+                if not os.path.exists(self.cur_dir) and cmd_type == CMD_TYPE.PIC:
+                    os.mkdir(self.cur_dir )
                 self.db.add_cmd(name, cmd_type)
                 self.db.add_alias(name, 0)
                 self.cmd_info = self.db.get_cmd_info(name)
