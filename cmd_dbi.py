@@ -195,7 +195,7 @@ class cmdDB:
 
     # alias operations
     def add_alias(self, new_cmd, parent):
-        self.db.execute("insert into cmd_alias(cmd, p_cmd_id, active) values(?, ?, 1) on conflict replace", (new_cmd, parent))
+        self.db.execute("insert into cmd_alias(cmd, p_cmd_id, active) values(?, ?, 1)", (new_cmd, parent))
         self.conn.commit()
 
     def make_parent(self, cmd):
@@ -206,10 +206,10 @@ class cmdDB:
 
     def get_real_cmd(self, cmd):
         real_cmd_id = 0
-        self.db.execute("select id, p_cmd_id, active from cmd_alias where ", (cmd,))
+        self.db.execute("select id, p_cmd_id, active from cmd_alias where cmd = ?", (cmd,))
         row = self.db.fetchone()
         while row and row[1] > 0 and row[2] != 0:
-            self.db.execute("select id, p_cmd_id, active from cmd_alias where ", (cmd,))
+            self.db.execute("select id, p_cmd_id, active from cmd_alias where id = ?", (row[1],))
             row = self.db.fetchone()
         if row and row[2] > 0:
             real_cmd_id = row[0]

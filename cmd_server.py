@@ -44,7 +44,11 @@ class reply_server:
     def checkout(self, cmd, cmd_type=0, create=False):
         real_cmd_id = self.db.get_real_cmd(cmd)  #handle alias
         self.cmd_info = self.db.get_cmd_info(cmd_id=real_cmd_id)
-        self.cur_dir = os.path.join(pic_dir, self.cmd_info.cmd)
+        if self.cmd_info:
+            self.cur_dir = os.path.join(pic_dir, self.cmd_info.cmd)
+        else:
+            self.cur_dir = os.path.join(pic_dir, cmd)
+
         if not self.cmd_info:
             if create:
                 if not os.path.exists(self.cur_dir) and cmd_type == CMD_TYPE.PIC:
@@ -87,7 +91,7 @@ class reply_server:
         checkout_good = False
         content = ctx.Content.strip()
         if len(content) > 1:
-            re.sub("[!?\uff1f\uff01]$", '', content)
+            content = re.sub("[!?\uff1f\uff01]$", '', content)
 
         space_index = content.find(' ')
         if space_index == -1:
