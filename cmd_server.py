@@ -40,6 +40,7 @@ class reply_server:
         self.reply = ""
         self.reply_type = 0
         self.user_id = ""
+        self.use_md5 = 0
         
     def checkout(self, cmd, cmd_type=0, create=False):
         real_cmd_id = self.db.get_real_cmd(cmd)  #handle alias
@@ -71,6 +72,17 @@ class reply_server:
         elif re.match("^alias.{1,}", cmd):  # save alias
             return self.save_alias(cmd[5:])
 
+    def handle_set_cmd(self, cmd):
+        if re.match("^md5", cmd):
+            if len(cmd) > 3:
+                self.use_md5 = 0
+                self.reply_type = REPLY_TYPE.TEXT
+                self.reply = "md5 off"
+            else:
+                self.use_md5 = 1
+                self.reply_type = REPLY_TYPE.TEXT
+                self.reply = "md5 on"
+
     def handle_cmd(self, ctx):
         self.reply_type = 0
         self.reply = ""
@@ -82,6 +94,8 @@ class reply_server:
 
         if re.match("^_save.{1,}", ctx.Content):
             return self.handle_save_cmd(ctx.Content[5:])
+        elif re.match("^_set.{1,}", ctx.Content):
+            return self.handle_set_cmd(ctx.Content[4:])
 
         arg = ""
         checkout_good = False
@@ -102,7 +116,10 @@ class reply_server:
 
         msg_type = self.cmd_info.type
         if msg_type == CMD_TYPE.PIC:
-            self.random_pic_path(arg)
+            if self.use_md5:
+                self.random_pic_md5(arg)
+            else:
+                self.random_pic_path(arg)
         elif msg_type == CMD_TYPE.TEXT_TAG or msg_type == CMD_TYPE.TEXT_FORMAT:
             self.random_reply(arg)
 
