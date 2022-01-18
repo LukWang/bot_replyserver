@@ -86,8 +86,8 @@ class cmdDB:
 
         return cmd_info
 
-    def add_cmd(self, cmd, type):
-        self.db.execute('insert into cmd_collection(cmd, type, active, amount) values(?, ?, 1, 0)', (cmd, type))
+    def add_cmd(self,cmd_id, cmd, type):
+        self.db.execute('insert into cmd_collection(id, cmd, type, active, amount) values(?, ?, ?, 1, 0)', (cmd_id, cmd, type))
         self.conn.commit()
 
     def disable_cmd(self, cmd_id, active):
@@ -197,6 +197,7 @@ class cmdDB:
     def add_alias(self, new_cmd, parent):
         self.db.execute("insert into cmd_alias(cmd, p_cmd_id, active) values(?, ?, 1)", (new_cmd, parent))
         self.conn.commit()
+        return self.get_real_cmd(new_cmd)
 
     def make_parent(self, cmd):
         self.db.execute("update cmd_alias set p_cmd_id = 0 where cmd = ?", (cmd, ))
