@@ -72,6 +72,25 @@ class cmdDB:
         self.db.execute('update cmd_alias set active = ? where id = ?', (active, cmd_id))
         self.conn.commit()
 
+    def get_all_cmd(self):
+        cmds = []
+        self.db.execute("select id, p_cmd_id, cmd, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8 from cmd_alias where order by id")
+        rows = self.db.fetchall()
+        if rows is not None:
+            for row in rows:
+                cmd_info = cmdInfo()
+                cmd_info.cmd_id = row[0]
+                cmd_info.orig_id = row[1]
+                cmd_info.cmd = row[2]
+                cmd_info.active = row[3]
+                cmd_info.cmd_type = row[4]
+                cmd_info.level = row[5]
+                cmd_info.sequences = {CMD_TYPE.PIC: row[6], CMD_TYPE.TEXT_TAG: row[7], CMD_TYPE.TEXT_FORMAT: row[8],
+                                      CMD_TYPE.VOICE: row[9]}
+                cmds.append(cmd_info)
+
+        return cmds
+
     def set_cmd_seq(self, cmd_id, type_id, sequence_id):
         self.db.execute('update cmd_alias set sequence_{} = ? where id = ?'.format(type_id), (sequence_id, cmd_id))
         self.conn.commit()

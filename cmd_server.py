@@ -93,7 +93,6 @@ class reply_server:
                     return False
 
         return True
-        
 
     def checkout(self, cmd: str, user_qq: str, cmd_type=0, create=False):
 
@@ -130,6 +129,55 @@ class reply_server:
             self.db.set_cmd_type(self.cmd_info.cmd_id, cmd_type)
             self.reply_type = REPLY_TYPE.TEXT
             self.reply = "{}类型变为:{}".format(cmd, cmd_type)
+
+    def list_all_cmd(self, user_qq):
+        output_text = ""
+        output_list = {}
+        if self.get_user(user_qq):
+            cmds = self.db.get_all_cmd()
+            if cmds is None:
+                return
+            for cmd in cmds:
+                if cmd.active and cmd.level < self.user_info.permission:
+                    if cmd.orig_id == 0:
+                        out_str = "{}:".format(cmd.cmd)
+                        if CMD_TYPE.PIC & cmd.cmd_type and cmd.sequences[CMD_TYPE.PIC]:
+                            out_str += " 图片回复{}项".format(cmd.sequences[CMD_TYPE.PIC])
+                        if CMD_TYPE.TEXT_TAG & cmd.cmd_type and cmd.sequences[CMD_TYPE.TEXT_TAG]:
+                            out_str += " 文字回复A类{}项".format(cmd.sequences[CMD_TYPE.TEXT_TAG])
+                        if CMD_TYPE.TEXT_FORMAT & cmd.cmd_type and cmd.sequences[CMD_TYPE.TEXT_FORMAT]:
+                            out_str += " 文字回复B类{}项".format(cmd.sequences[CMD_TYPE.TEXT_FORMAT])
+                        if CMD_TYPE.VOICE & cmd.cmd_type and cmd.sequences[CMD_TYPE.VOICE]:
+                            out_str += " 语音回复{}项".format(cmd.sequences[CMD_TYPE.VOICE])
+
+                        output_list[cmd.id] = out_str
+                    else:
+                        parent_id = 0
+                        if cmd.orig_id in output_list:
+                            parent_id = cmd.orig_id
+                        else:
+                            cmd_tmp = cmd
+                            while True:
+                                parent_id = 0
+                                for cmd_p in cmds:
+                                    if cmd_p.cmd_id == cmd_tmp.orig_id:
+                                        cmd_tmp = cmd_p
+                                        if cmd_tmp.orig_id == 0:
+                                            parent_id = cmd_tmp.cmd_id
+                                        else:
+                                            parent_id = -1
+                                        break
+                                if parent_id >= 0:
+                                    break
+
+                        if parent_id in output_list:
+                            output_list[parent_id] += "({})".format(cmd.cmd)
+            for key, value in output_list:
+                output_text += value + "\n"
+
+            if len(output_text):
+                self.reply = output_text
+                self.reply_type = REPLY_TYPE.TEXT
 
     def handle_save_cmd(self, cmd, user_qq):
         logger.debug('saving {}'.format(cmd))
@@ -169,6 +217,8 @@ class reply_server:
             return self.handle_save_cmd(ctx.Content[5:], user_qq)
         elif re.match("^_set.{1,}", ctx.Content):
             return self.handle_set_cmd(ctx.Content[4:])
+        elif ctx.Content == "_listcmd":
+            return self.get_all_cmd(user_qq)
         
         arg = ""
         checkout_good = False
