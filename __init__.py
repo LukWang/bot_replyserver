@@ -4,8 +4,7 @@ from botoy.parser import friend, group
 from botoy.decorators import ignore_botself
 from botoy.session import SessionHandler, session, FILTER_SUCCESS, ctx
 import re
-from .cmd_server import reply_server, PicObj, REPLY_TYPE
-from .cmd_dbi import CMD_TYPE
+from replyserver import reply_server, PicObj, REPLY_TYPE, CMD_TYPE
 import time
 
 __doc__ = """图片存储助手"""
@@ -44,7 +43,13 @@ def _par(ctx):
 def _h():
     prefix = '_savepic'
     cmd = ctx.Content[len(prefix):]
-    if l_reply_server.checkout(cmd, cmd_type=CMD_TYPE.PIC, create = True):
+    user_qq = ""
+    try:
+        user_qq = ctx.FromUin
+    except:
+        user_qq = ctx.FromUserId
+
+    if l_reply_server.checkout(cmd, user_qq, cmd_type=CMD_TYPE.PIC, create = True):
         session.send_text('开启{}存储模式，请发送图片'.format(cmd))
     else:
         session.send_text('访问{}图片仓库失败'.format(cmd))
