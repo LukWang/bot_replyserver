@@ -51,12 +51,15 @@ class Selector:
         self.weights.append(self.last_wei)
 
     def shuffle(self):
+        if len(self.candies) == 0:
+            return None
+
         result = random.randint(1, self.last_wei)
         index = 0
         while index < len(self.candies):
             if result <= self.weights[index]:
                 break
-            index += index
+            index += 1 
 
         return self.candies[index]
 
@@ -91,6 +94,7 @@ class reply_server:
 
         return True
         
+
     def checkout(self, cmd: str, user_qq: str, cmd_type=0, create=False):
 
         self.cmd_info = self.db.get_real_cmd(cmd)  # handle alias
@@ -157,15 +161,15 @@ class reply_server:
         self.reply = ""
         user_qq = ""
         if isinstance(ctx, FriendMsg):
-            user_qq = ctx.FromUin
+            user_qq = str(ctx.FromUin)
         elif isinstance(ctx, GroupMsg):
-            user_qq = ctx.FromUserId
+            user_qq = str(ctx.FromUserId)
 
         if re.match("^_save.{1,}", ctx.Content):
             return self.handle_save_cmd(ctx.Content[5:], user_qq)
         elif re.match("^_set.{1,}", ctx.Content):
             return self.handle_set_cmd(ctx.Content[4:])
-
+        
         arg = ""
         checkout_good = False
         content = ctx.Content.strip()
