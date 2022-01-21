@@ -68,13 +68,13 @@ class cmdDB:
     def make_parent(self, cmd):
         self.db.execute("update cmd_alias set p_cmd_id = 0 where cmd = ?", (cmd, ))
 
-    def set_cmd_active(self, cmd_id, active):
-        self.db.execute('update cmd_alias set active = ? where id = ?', (active, cmd_id))
+    def set_cmd_active(self, cmd, active):
+        self.db.execute('update cmd_alias set active = ? where cmd = ?', (active, cmd))
         self.conn.commit()
 
     def get_all_cmd(self):
         cmds = []
-        self.db.execute("select id, p_cmd_id, cmd, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8 from cmd_alias where order by id")
+        self.db.execute("select id, p_cmd_id, cmd, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8 from cmd_alias where type < 1000 order by id")
         rows = self.db.fetchall()
         if rows is not None:
             for row in rows:

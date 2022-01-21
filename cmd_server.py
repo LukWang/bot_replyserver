@@ -74,7 +74,8 @@ class reply_server:
         self.reply2 = ""
         self.reply_type = 0
         self.user_info = None
-        self.use_md5 = 0
+        self.use_md5 = 1
+        self.group_flag = True
 
     def get_user(self, user_qq):
         if user_qq in g_user_cache:
@@ -130,6 +131,18 @@ class reply_server:
             self.reply_type = REPLY_TYPE.TEXT
             self.reply = "{}类型变为:{}".format(cmd, cmd_type)
 
+    def set_cmd_active(self, cmd, active, user_qq):
+        
+        self.reply_type = REPLY_TYPE.TEXT
+        if user_qq == super_user:
+            self.db.set_cmd_active(cmd, active)
+            if active == 0:
+                self.reply = "关键词【{}】已禁用".format(cmd)
+            else:
+                self.reply = "关键词【{}】已启用".format(cmd)
+        else:
+            self.reply = "主人说不可以听陌生人的话捏".format(cmd)
+
     def list_all_cmd(self, user_qq):
         output_text = ""
         output_list = {}
@@ -150,7 +163,7 @@ class reply_server:
                         if CMD_TYPE.VOICE & cmd.cmd_type and cmd.sequences[CMD_TYPE.VOICE]:
                             out_str += " 语音回复{}项".format(cmd.sequences[CMD_TYPE.VOICE])
 
-                        output_list[cmd.id] = out_str
+                        output_list[cmd.cmd_id] = out_str
                     else:
                         parent_id = 0
                         if cmd.orig_id in output_list:
@@ -172,7 +185,7 @@ class reply_server:
 
                         if parent_id in output_list:
                             output_list[parent_id] += "({})".format(cmd.cmd)
-            for key, value in output_list:
+            for value in output_list.values():
                 output_text += value + "\n"
 
             if len(output_text):
@@ -210,21 +223,30 @@ class reply_server:
         user_qq = ""
         if isinstance(ctx, FriendMsg):
             user_qq = str(ctx.FromUin)
+            self.group_flag = False
         elif isinstance(ctx, GroupMsg):
             user_qq = str(ctx.FromUserId)
+            self.group_flag = True
 
         if re.match("^_save.{1,}", ctx.Content):
             return self.handle_save_cmd(ctx.Content[5:], user_qq)
         elif re.match("^_set.{1,}", ctx.Content):
             return self.handle_set_cmd(ctx.Content[4:])
         elif ctx.Content == "_listcmd":
-            return self.get_all_cmd(user_qq)
-        
+            return self.list_all_cmd(user_qq)
+        elif re.match("^_disable.{1,}", ctx.Content):
+            return self.set_cmd_active(ctx.Content[8:], 0, user_qq)
+        elif re.match("^_enable.{1,}", ctx.Content):
+            return self.set_cmd_active(ctx.Content[7:], 1, user_qq)
         arg = ""
         checkout_good = False
         content = ctx.Content.strip()
         if len(content) > 1:
             content = re.sub("[!?\uff1f\uff01]$", '', content)  # erase ! ? at end of content
+        pic_flag = False
+        if re.match("^来张.{1,}", content):
+            content = content[len("来张"):]
+            pic_flag = True
 
         space_index = content.find(' ')
         if space_index == -1:
@@ -236,6 +258,9 @@ class reply_server:
             arg = arg.strip()
         if not checkout_good:
             return
+
+        if pic_flag:
+            self.cmd_info.cmd_type = CMD_TYPE.PIC
 
         return self.random_reply(arg)
 
@@ -304,7 +329,7 @@ class reply_server:
         return reply_info
 
     def random_pic(self, arg):
-        if self.use_md5:
+        if self.use_md5 and self.group_flag:
             self.random_pic_md5(arg)
         else:
             self.random_pic_path(arg)
