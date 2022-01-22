@@ -1,0 +1,6 @@
+{
+  "super_user": "12345678",
+  "pic_dir": "/mnt/data/pics",
+  "voice_dir": "/mnt/data/voice",
+  "db_schema":"***.db"
+}

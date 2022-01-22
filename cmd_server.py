@@ -362,13 +362,13 @@ class reply_server:
             voice_info = self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.VOICE, tag)
         else:
             reply_id = random.randint(1, self.cmd_info.sequences[CMD_TYPE.VOICE])
-            reply_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.VOICE, reply_id)
+            voice_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.VOICE, reply_id)
 
         if voice_info:
             self.db.used_inc(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
                              CMD_TYPE.VOICE, voice_info.reply_id)
             self.reply_type = REPLY_TYPE.VOICE
-            self.reply = os.path.join(voice_dir, voice_info.tag + '.' + voice_info.file_type)
+            self.reply = os.path.join(voice_dir, "{}/{}.{}".format(self.cmd_info.cmd, voice_info.tag, voice_info.file_type))
 
     @staticmethod
     def find_imgtype(type_str):
@@ -479,19 +479,19 @@ class reply_server:
 
     def scan_voice_sub_dir(self, cmd, sub_dir):
         record = ""
-        for voice_file in os.listdir(voice_dir):
+        for voice_file in os.listdir(sub_dir):
             print("find:" + voice_file)
-            if os.path.isfile(os.path.join(voice_dir, voice_file)):
+            if os.path.isfile(os.path.join(sub_dir, voice_file)):
                 file, ext = self.split_file_type(voice_file)
                 if self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.VOICE, file):
                     continue
                 else:
+                    self.cmd_info.sequences[CMD_TYPE.VOICE] += 1
                     voice_seq = self.cmd_info.sequences[CMD_TYPE.VOICE]
-                    voice_seq += 1
                     self.db.add_reply(self.cmd_info.cmd_id, CMD_TYPE.VOICE, voice_seq,
                                       tag=file, file_type=ext, user_id=self.user_info.user_id)
                     self.db.set_cmd_seq(self.cmd_info.cmd_id, CMD_TYPE.VOICE, voice_seq)
-                    record += "{}:{} 已添加/n".format(cmd, file)
+                    record += "{}:{} 已添加\n".format(cmd, file)
         return record
 
     def scan_voice_dir(self):
