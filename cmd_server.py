@@ -480,6 +480,7 @@ class reply_server:
     def scan_voice_sub_dir(self, cmd, sub_dir):
         record = ""
         for voice_file in os.listdir(voice_dir):
+            print("find:" + voice_file)
             if os.path.isfile(os.path.join(voice_dir, voice_file)):
                 file, ext = self.split_file_type(voice_file)
                 if self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.VOICE, file):
@@ -496,9 +497,11 @@ class reply_server:
     def scan_voice_dir(self):
         self.reply_type = REPLY_TYPE.TEXT
         reports = ""
+        print("start voice scanning")
         voice_subs = os.listdir(voice_dir)
         for cmd in voice_subs:
             sub_dir = os.path.join(voice_dir, cmd)
+            print("find:"+sub_dir)
             if os.path.isdir(sub_dir):
                 if not self.checkout(cmd, super_user, cmd_type=CMD_TYPE.VOICE, create=True):
                     self.reply = "命令索引创建/查找失败"
