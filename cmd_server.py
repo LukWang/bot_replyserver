@@ -20,6 +20,7 @@ try:
     with open(cur_file_dir + '/config.json', 'r', encoding='utf-8') as f:
         config = json.load(f)
         pic_dir = config['pic_dir']
+        voice_dir = config['voice_dir']
         super_user = config["super_user"]
 except:
     logger.error('config error')
@@ -34,6 +35,7 @@ class REPLY_TYPE:
     PIC_MD5 = 1
     PIC_PATH = 2
     TEXT = 3
+    VOICE = 4
 
 
 CMD_TYPE_LIST = [CMD_TYPE.PIC, CMD_TYPE.TEXT_TAG, CMD_TYPE.TEXT_FORMAT, CMD_TYPE.VOICE]
@@ -238,6 +240,9 @@ class reply_server:
             return self.set_cmd_active(ctx.Content[8:], 0, user_qq)
         elif re.match("^_enable.{1,}", ctx.Content):
             return self.set_cmd_active(ctx.Content[7:], 1, user_qq)
+        elif ctx.Content == "_scanvoice":
+            return self.scan_voice_dir()
+
         arg = ""
         checkout_good = False
         content = ctx.Content.strip()
@@ -286,6 +291,8 @@ class reply_server:
             self.random_ftext(arg)
         elif cmd_type == CMD_TYPE.PIC:
             self.random_pic(arg)
+        elif cmd_type == CMD_TYPE.VOICE:
+            self.random_voice(arg)
 
     def random_text(self, tag):
         reply_info = None
@@ -299,7 +306,7 @@ class reply_server:
             self.reply = reply_info.reply
             self.reply_type = REPLY_TYPE.TEXT
             self.db.used_inc(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
-                             CMD_TYPE.TEXT_TAG, reply_info.reply_id )
+                             CMD_TYPE.TEXT_TAG, reply_info.reply_id)
 
     def random_ftext(self, arg):
         reply_info = None
@@ -322,9 +329,9 @@ class reply_server:
         else:
             reply_id = random.randint(1, self.cmd_info.sequences[CMD_TYPE.PIC])
             reply_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.PIC, reply_id)
-            if reply_info:
-                self.db.used_inc(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
-                                 CMD_TYPE.PIC, reply_info.reply_id)
+        if reply_info:
+            self.db.used_inc(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
+                             CMD_TYPE.PIC, reply_info.reply_id)
 
         return reply_info
 
@@ -348,6 +355,20 @@ class reply_server:
             file_name = os.path.join(self.cur_dir,file_name)
             self.reply=file_name
             self.reply_type = REPLY_TYPE.PIC_PATH
+
+    def random_voice(self, tag):
+        voice_info = None
+        if len(tag):
+            voice_info = self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.VOICE, tag)
+        else:
+            reply_id = random.randint(1, self.cmd_info.sequences[CMD_TYPE.VOICE])
+            reply_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.VOICE, reply_id)
+
+        if voice_info:
+            self.db.used_inc(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
+                             CMD_TYPE.VOICE, voice_info.reply_id)
+            self.reply_type = REPLY_TYPE.VOICE
+            self.reply = os.path.join(voice_dir, voice_info.tag + '.' + voice_info.file_type)
 
     @staticmethod
     def find_imgtype(type_str):
@@ -447,6 +468,52 @@ class reply_server:
         if self.checkout(app, user_qq, create=True, cmd_type=1000):
             self.db.used_inc(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
                              1000, 1)
+
+    @staticmethod
+    def split_file_type(file_name: str):
+        ext_ind = file_name.rfind('.')
+        if ext_ind == -1:
+            return file_name, ""
+        else:
+            return file_name[:ext_ind], file_name[ext_ind+1:]
+
+    def scan_voice_sub_dir(self, cmd, sub_dir):
+        record = ""
+        for voice_file in os.listdir(voice_dir):
+            if os.path.isfile(os.path.join(voice_dir, voice_file)):
+                file, ext = self.split_file_type(voice_file)
+                if self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.VOICE, file):
+                    continue
+                else:
+                    voice_seq = self.cmd_info.sequences[CMD_TYPE.VOICE]
+                    voice_seq += 1
+                    self.db.add_reply(self.cmd_info.cmd_id, CMD_TYPE.VOICE, voice_seq,
+                                      tag=file, file_type=ext, user_id=self.user_info.user_id)
+                    self.db.set_cmd_seq(self.cmd_info.cmd_id, CMD_TYPE.VOICE, voice_seq)
+                    record += "{}:{} 已添加/n".format(cmd, file)
+        return record
+
+    def scan_voice_dir(self):
+        self.reply_type = REPLY_TYPE.TEXT
+        reports = ""
+        voice_subs = os.listdir(voice_dir)
+        for cmd in voice_subs:
+            sub_dir = os.path.join(voice_dir, cmd)
+            if os.path.isdir(sub_dir):
+                if not self.checkout(cmd, super_user, cmd_type=CMD_TYPE.VOICE, create=True):
+                    self.reply = "命令索引创建/查找失败"
+                    return
+                if self.cmd_info.cmd_type & CMD_TYPE.VOICE == 0:
+                    new_type = self.cmd_info.cmd_type | CMD_TYPE.VOICE
+                    self.set_cmd_type(cmd, str(new_type))
+                reports += self.scan_voice_sub_dir(cmd, sub_dir)
+
+        self.reply = reports
+
+
+
+
+
 
 
 
