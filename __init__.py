@@ -1,5 +1,5 @@
-from botoy import MsgTypes, S, GroupMsg, FriendMsg
-from botoy.sugar import Picture, Text
+from botoy import logger, MsgTypes, S, GroupMsg, FriendMsg
+from botoy.sugar import Picture, Text, Voice
 from botoy.parser import friend, group
 from botoy.decorators import ignore_botself
 from botoy.session import SessionHandler, session, FILTER_SUCCESS, ctx
@@ -45,9 +45,9 @@ def _h():
     cmd = ctx.Content[len(prefix):]
     user_qq = ""
     try:
-        user_qq = ctx.FromUin
+        user_qq = str(ctx.FromUin)
     except:
-        user_qq = ctx.FromUserId
+        user_qq = str(ctx.FromUserId)
 
     if l_reply_server.checkout(cmd, user_qq, cmd_type=CMD_TYPE.PIC, create = True):
         session.send_text('开启{}存储模式，请发送图片'.format(cmd))
@@ -89,11 +89,15 @@ def main(ctx):
         l_reply_server.handle_cmd(ctx)
         reply_type = l_reply_server.reply_type
         if reply_type == REPLY_TYPE.PIC_MD5:
-            Picture(pic_md5=l_reply_server.reply)
+            replier = S.bind(ctx)
+            replier.image(data=l_reply_server.reply, type=S.TYPE_MD5)
         elif reply_type == REPLY_TYPE.PIC_PATH:
             Picture(pic_path=l_reply_server.reply)
         elif reply_type == REPLY_TYPE.TEXT:
             Text(l_reply_server.reply)
+        elif reply_type == REPLY_TYPE.VOICE:
+            logger.info("send voice: "+l_reply_server.reply)
+            Voice(voice_path=l_reply_server.reply)
 
 
 receive_group_msg=receive_friend_msg=main
