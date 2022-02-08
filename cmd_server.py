@@ -1,8 +1,13 @@
 import json
 import os, random
-from botoy import logger, GroupMsg, FriendMsg, jconfig
+import time
+
+from botoy import logger, GroupMsg, FriendMsg, jconfig, Action
+from botoy.utils import file_to_base64
 import httpx
 import re
+import queue
+from typing import Union
 
 from .cmd_dbi import cmdDB, cmdInfo, replyInfo, CMD_TYPE, userInfo
 
@@ -68,7 +73,7 @@ class Selector:
 
 class reply_server:
 
-    def __init__(self):
+    def __init__(self, is_session=False):
         self.db = cmdDB()
         self.cmd_info = cmdInfo()
         self.cur_dir = ''
@@ -79,7 +84,39 @@ class reply_server:
         self.use_md5 = 1
         self.group_flag = True
         self.reply_at = False
-        print("reply_server created")
+        if is_session:
+            self.cmd_queue = None
+            self.action = None
+        else:
+            self.cmd_queue = queue.Queue()
+            self.action = Action(jconfig.bot, host=jconfig.host, port=jconfig.port)
+            self.wait_for_msg()
+
+    def enqueue(self, ctx: Union[GroupMsg, FriendMsg]):
+        if self.cmd_queue and (isinstance(ctx, FriendMsg) or isinstance(ctx, GroupMsg)):
+            self.cmd_queue.put(ctx)
+
+    def wait_for_msg(self):
+        while self.cmd_queue:
+            if not self.cmd_queue.empty():
+                ctx = self.cmd_queue.get()
+                self.handle_cmd(ctx)
+                self.handle_reply(ctx)
+                time.sleep(0.3)
+            else:
+                time.sleep(1)
+
+    def handle_reply(self, ctx: Union[GroupMsg, FriendMsg]):
+        if self.action and self.reply_type:
+            if self.group_flag:
+                if self.reply_type == REPLY_TYPE.PIC_MD5:
+                    self.action.sendGroupPic(ctx.FromGroupId, content=self.reply2, picMd5s=self.reply)
+                elif self.reply_type == REPLY_TYPE.PIC_PATH:
+                    self.action.sendGroupPic(ctx.FromGroupId, content=self.reply2, picBase64Buf=file_to_base64(self.reply))
+                elif self.reply_type == REPLY_TYPE.TEXT:
+                    self.action.sendGroupText(ctx.FromGroupId, content=self.reply, atUser=self.reply_at)
+                elif self.reply_type == REPLY_TYPE.VOICE:
+                    self.action.sendGroupVoice(ctx.FromGroupId, voiceBase64Buf=file_to_base64(self.reply))
 
     def get_user(self, user_qq):
         if user_qq in g_user_cache:
@@ -271,7 +308,6 @@ class reply_server:
         self.reply_at = True
 
     def handle_cmd(self, ctx):
-
         self.reply_at = False
         self.reply_type = 0
         self.reply = ""
