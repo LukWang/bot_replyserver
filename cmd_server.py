@@ -165,6 +165,7 @@ class reply_server:
         if self.get_user(target_qq):
             permission = int(permission)
             self.db.set_user_permission(self.user_info.user_id, permission)
+            g_user_cache[target_qq].permission = permission
             self.reply_type = REPLY_TYPE.TEXT
             self.reply = "用户【{}】，权限已修改为【{}】".format(target_qq, permission)
 
@@ -242,7 +243,7 @@ class reply_server:
 
         if re.match("^cmd", cmd):
             cmd, arg = self.get_next_arg(cmd)
-            self.set_permission(cmd[3:], arg)
+            self.set_cmd_level(cmd[3:], arg)
         elif re.match("^user", cmd):
             cmd, arg = self.get_next_arg(cmd)
             self.set_permission(target, arg)
@@ -271,7 +272,7 @@ class reply_server:
 
     def handle_cmd(self, ctx):
 
-        self.reply_at = True
+        self.reply_at = False
         self.reply_type = 0
         self.reply = ""
         user_qq = ""
