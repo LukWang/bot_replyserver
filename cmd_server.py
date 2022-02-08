@@ -4,7 +4,7 @@ from botoy import logger, GroupMsg, FriendMsg, jconfig
 import httpx
 import re
 
-from .cmd_dbi import cmdDB, cmdInfo, replyInfo, CMD_TYPE
+from .cmd_dbi import cmdDB, cmdInfo, replyInfo, CMD_TYPE, userInfo
 
 
 class PicObj:
@@ -78,6 +78,8 @@ class reply_server:
         self.user_info = None
         self.use_md5 = 1
         self.group_flag = True
+        self.reply_at = False
+        print("reply_server created")
 
     def get_user(self, user_qq):
         if user_qq in g_user_cache:
@@ -136,14 +138,35 @@ class reply_server:
     def set_cmd_active(self, cmd, active, user_qq):
         
         self.reply_type = REPLY_TYPE.TEXT
-        if user_qq == super_user:
-            self.db.set_cmd_active(cmd, active)
-            if active == 0:
-                self.reply = "关键词【{}】已禁用".format(cmd)
-            else:
-                self.reply = "关键词【{}】已启用".format(cmd)
+
+        self.db.set_cmd_active(cmd, active)
+        if active == 0:
+            self.reply = "关键词【{}】已禁用".format(cmd)
         else:
-            self.reply = "主人说不可以听陌生人的话捏".format(cmd)
+            self.reply = "关键词【{}】已启用".format(cmd)
+
+    def set_cmd_level(self, cmd, level):
+        if cmd and level:
+            level = int(level)
+            if self.checkout(cmd, super_user):
+                self.db.set_cmd_level(self.cmd_info.cmd_id, level)
+                self.reply_type = REPLY_TYPE.TEXT
+                self.reply = "关键词【{}】，等级已修改为【{}】".format(cmd, level)
+            else:
+                self.reply_type = REPLY_TYPE.TEXT
+                self.reply = "找不到关键词【{}】捏".format(cmd)
+
+    def set_permission(self, target_qq, permission):
+        if not target_qq:
+            target_qq = super_user
+        if not permission:
+            return
+
+        if self.get_user(target_qq):
+            permission = int(permission)
+            self.db.set_user_permission(self.user_info.user_id, permission)
+            self.reply_type = REPLY_TYPE.TEXT
+            self.reply = "用户【{}】，权限已修改为【{}】".format(target_qq, permission)
 
     def list_all_cmd(self, user_qq):
         output_text = ""
@@ -211,8 +234,19 @@ class reply_server:
         elif re.match("^alias.{1,}", cmd):  # save alias
             return self.save_alias(cmd[5:])
 
-    def handle_set_cmd(self, cmd):
-        if re.match("^md5", cmd):
+    def handle_set_cmd(self, cmd, user_qq, target):
+        if user_qq != super_user:
+            self.reply_type = REPLY_TYPE.TEXT
+            self.reply = "主人说不可以听陌生人的话捏".format(cmd)
+            return
+
+        if re.match("^cmd", cmd):
+            cmd, arg = self.get_next_arg(cmd)
+            self.set_permission(cmd[3:], arg)
+        elif re.match("^user", cmd):
+            cmd, arg = self.get_next_arg(cmd)
+            self.set_permission(target, arg)
+        elif re.match("^md5", cmd):
             if len(cmd) > 3:
                 self.use_md5 = 0
                 self.reply_type = REPLY_TYPE.TEXT
@@ -221,12 +255,23 @@ class reply_server:
                 self.use_md5 = 1
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "md5 on"
-        if re.match("^type", cmd):
+        elif re.match("^type", cmd):
             cmd, arg = self.get_next_arg(cmd)
             self.set_cmd_type(cmd[4:], arg)
 
+    def handle_check_cmd(self, cmd, user_qq):
+        if re.match("^user", cmd):
+            self.check_user(user_qq)
+
+    def check_user(self, user_qq):
+        self.get_user(user_qq)
+        self.reply_type = REPLY_TYPE.TEXT
+        self.reply = "你的权限为:【{}】".format(self.user_info.permission)
+        self.reply_at = True
+
     def handle_cmd(self, ctx):
 
+        self.reply_at = True
         self.reply_type = 0
         self.reply = ""
         user_qq = ""
@@ -237,17 +282,23 @@ class reply_server:
             user_qq = str(ctx.FromUserId)
             self.group_flag = True
 
+        target = None
+        if ctx.MsgType == "AtMsg":
+            target = ctx.target[0]
+
         if "_save" == ctx.Content[:5]:
             logger.info("Is save cmd")
             return self.handle_save_cmd(ctx.Content[5:], user_qq)
         elif re.match("^_set.{1,}", ctx.Content):
-            return self.handle_set_cmd(ctx.Content[4:])
+            return self.handle_set_cmd(ctx.Content[4:], user_qq, target)
         elif ctx.Content == "_listcmd":
             return self.list_all_cmd(user_qq)
         elif re.match("^_disable.{1,}", ctx.Content):
             return self.set_cmd_active(ctx.Content[8:], 0, user_qq)
         elif re.match("^_enable.{1,}", ctx.Content):
             return self.set_cmd_active(ctx.Content[7:], 1, user_qq)
+        elif re.match("^_check.{1,}", ctx.Content):
+            return self.handle_check_cmd(ctx.Content[6:], user_qq)
         elif ctx.Content == "_scanvoice":
             return self.scan_voice_dir()
 

@@ -196,6 +196,10 @@ class cmdDB:
 
         return user_info
 
+    def set_user_permission(self, user_id, permission):
+        self.db.execute('update users set permission=? where user_id=?', (permission, user_id))
+        self.conn.commit()
+
     def used_inc(self, user_id, orig_id, cmd_id, reply_type, reply_id):
         self.db.execute('update replies set time_used = time_used + 1 where cmd_id = ? and type = ? and id = ?', (cmd_id, reply_type, reply_id))
         try:
