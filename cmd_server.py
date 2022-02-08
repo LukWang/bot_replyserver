@@ -1,6 +1,6 @@
 import json
 import os, random
-from botoy import logger, GroupMsg, FriendMsg
+from botoy import logger, GroupMsg, FriendMsg, jconfig
 import httpx
 import re
 
@@ -98,7 +98,7 @@ class reply_server:
         return True
 
     def checkout(self, cmd: str, user_qq: str, cmd_type=0, create=False):
-
+        cmd = cmd.upper()
         self.cmd_info = self.db.get_real_cmd(cmd)  # handle alias
 
         if self.cmd_info:
@@ -155,15 +155,19 @@ class reply_server:
             for cmd in cmds:
                 if cmd.active and cmd.level < self.user_info.permission:
                     if cmd.orig_id == 0:
-                        out_str = "{}:".format(cmd.cmd)
-                        if CMD_TYPE.PIC & cmd.cmd_type and cmd.sequences[CMD_TYPE.PIC]:
-                            out_str += " 图片回复{}项".format(cmd.sequences[CMD_TYPE.PIC])
-                        if CMD_TYPE.TEXT_TAG & cmd.cmd_type and cmd.sequences[CMD_TYPE.TEXT_TAG]:
-                            out_str += " 文字回复A类{}项".format(cmd.sequences[CMD_TYPE.TEXT_TAG])
-                        if CMD_TYPE.TEXT_FORMAT & cmd.cmd_type and cmd.sequences[CMD_TYPE.TEXT_FORMAT]:
-                            out_str += " 文字回复B类{}项".format(cmd.sequences[CMD_TYPE.TEXT_FORMAT])
-                        if CMD_TYPE.VOICE & cmd.cmd_type and cmd.sequences[CMD_TYPE.VOICE]:
-                            out_str += " 语音回复{}项".format(cmd.sequences[CMD_TYPE.VOICE])
+                        if re.match("^_.*", cmd.cmd):
+                            continue
+                        out_str = cmd.cmd
+                        if self.user_info.permission > 50:
+                            if CMD_TYPE.PIC & cmd.cmd_type and cmd.sequences[CMD_TYPE.PIC]:
+                                out_str += " 图片回复{}项".format(cmd.sequences[CMD_TYPE.PIC])
+                            if CMD_TYPE.TEXT_TAG & cmd.cmd_type and cmd.sequences[CMD_TYPE.TEXT_TAG]:
+                                out_str += " 文字回复A类{}项".format(cmd.sequences[CMD_TYPE.TEXT_TAG])
+                            if CMD_TYPE.TEXT_FORMAT & cmd.cmd_type and cmd.sequences[CMD_TYPE.TEXT_FORMAT]:
+                                continue
+                                #out_str += " 文字回复B类{}项".format(cmd.sequences[CMD_TYPE.TEXT_FORMAT])
+                            if CMD_TYPE.VOICE & cmd.cmd_type and cmd.sequences[CMD_TYPE.VOICE]:
+                                out_str += " 语音回复{}项".format(cmd.sequences[CMD_TYPE.VOICE])
 
                         output_list[cmd.cmd_id] = out_str
                     else:
@@ -188,14 +192,16 @@ class reply_server:
                         if parent_id in output_list:
                             output_list[parent_id] += "({})".format(cmd.cmd)
             for value in output_list.values():
-                output_text += value + "\n"
+                if len(value):
+                    output_text += value + "\n"
 
             if len(output_text):
-                self.reply = output_text
+                template = "当前已存储以下关键词:\n{}【调教方法】\n发送【_savepic关键词】开启图片存储会话\n发送【_savetxt关键词 reply回复】存储文字回复\n发送【_savealias子关键词 父关键词】建立同义词关联\n语音调教暂时不支持使用~\n例:\n_savepic色色\n_savetxt我想色色 reply不许色色！ (reply前有空格)\n_savealias我要色色 我想色色\n注意不要教我奇怪的东西哦~[表情109]"
+                self.reply = template.format(output_text)
                 self.reply_type = REPLY_TYPE.TEXT
 
     def handle_save_cmd(self, cmd, user_qq):
-        logger.debug('saving {}'.format(cmd))
+        logger.info('saving {}'.format(cmd))
         if re.match("^pic.{1,}", cmd):  # should be handled by session
             return
         elif re.match("^txt.{1,}", cmd):  # save TEXT reply
@@ -220,6 +226,7 @@ class reply_server:
             self.set_cmd_type(cmd[4:], arg)
 
     def handle_cmd(self, ctx):
+
         self.reply_type = 0
         self.reply = ""
         user_qq = ""
@@ -230,7 +237,8 @@ class reply_server:
             user_qq = str(ctx.FromUserId)
             self.group_flag = True
 
-        if re.match("^_save.{1,}", ctx.Content):
+        if "_save" == ctx.Content[:5]:
+            logger.info("Is save cmd")
             return self.handle_save_cmd(ctx.Content[5:], user_qq)
         elif re.match("^_set.{1,}", ctx.Content):
             return self.handle_set_cmd(ctx.Content[4:])
@@ -424,24 +432,28 @@ class reply_server:
         else:
             return cmd, None, None
 
-        space_index = arg.find(' reply:')
+        space_index = arg.find(' reply')
         if space_index >= 0:
-            reply = arg[space_index+7:]
+            reply = arg[space_index+6:]
             arg = arg[0:space_index]
             arg = arg.strip()
 
         return cmd, arg, reply
 
     def save_text_reply(self, cmd, user_qq):
-        logger.debug('saving {}'.format(cmd))
+        logger.info('saving {}'.format(cmd))
         cmd, tag, reply = self.save_cmd_parse(cmd)
-        if len(cmd) and len(reply):
+        if len(cmd) and reply and len(reply):
             if self.checkout(cmd, user_qq, cmd_type=CMD_TYPE.TEXT_TAG, create=True):
                 new_reply_id = self.cmd_info.sequences[CMD_TYPE.TEXT_TAG] + 1
                 self.db.add_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, new_reply_id, tag=tag, reply=reply, user_id=self.user_info.user_id)
                 self.db.set_cmd_seq(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, new_reply_id)
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "回复存储成功，{}({}):{}".format(cmd, tag, reply)
+            else:
+                self.reply_type = REPLY_TYPE.TEXT
+                self.reply = "这个关键词好像用不了捏"
+
 
     def save_ftext_reply(self, cmd, user_qq):
         cmd, arg, reply = self.save_cmd_parse(cmd)
@@ -452,6 +464,9 @@ class reply_server:
                 self.db.set_cmd_seq(self.cmd_info.cmd_id, CMD_TYPE.TEXT_FORMAT, new_reply_id)
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "定形回复存储成功，{}({}):{}".format(cmd,arg,reply)
+            else:
+                self.reply_type = REPLY_TYPE.TEXT
+                self.reply = "这个关键词好像用不了捏"
 
     def save_alias(self, cmd):
         space_index = cmd.find(' ')
@@ -462,7 +477,7 @@ class reply_server:
             if self.checkout(p_cmd, super_user):
                 self.db.add_alias(cmd, self.cmd_info.cmd_id, 0, 0)
                 self.reply_type = REPLY_TYPE.TEXT
-                self.reply = "alias设置成功:{} to {}".format(cmd, p_cmd)
+                self.reply = "同义词设置成功:{} = {}".format(cmd, p_cmd)
 
     def app_usage(self, app: str, user_qq):
         if self.checkout(app, user_qq, create=True, cmd_type=1000):

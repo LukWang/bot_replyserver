@@ -113,7 +113,7 @@ class cmdDB:
         while row and row[1] > 0 and row[2] != 0:
             self.db.execute("select id, p_cmd_id, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8, cmd from cmd_alias where id = ?", (row[1],))
             row = self.db.fetchone()
-        if row and row[2] > 0:
+        if row:
             cmd_info = cmdInfo()
             cmd_info.cmd_id = row[0]
             cmd_info.orig_id = orig_cmd_id
