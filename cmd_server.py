@@ -84,20 +84,21 @@ class reply_server:
         self.use_md5 = 1
         self.group_flag = True
         self.reply_at = False
+        self.running = False
         if is_session:
             self.cmd_queue = None
             self.action = None
         else:
             self.cmd_queue = queue.Queue()
             self.action = Action(jconfig.bot, host=jconfig.host, port=jconfig.port)
-            self.wait_for_msg()
 
     def enqueue(self, ctx: Union[GroupMsg, FriendMsg]):
         if self.cmd_queue and (isinstance(ctx, FriendMsg) or isinstance(ctx, GroupMsg)):
             self.cmd_queue.put(ctx)
 
     def wait_for_msg(self):
-        while self.cmd_queue:
+        self.running = True
+        while self.cmd_queue and self.running:
             if not self.cmd_queue.empty():
                 ctx = self.cmd_queue.get()
                 self.handle_cmd(ctx)
