@@ -121,11 +121,8 @@ class cmdDB:
             cmd_info.active = row[2]
             cmd_info.cmd_type = row[3]
             cmd_info.level = row[4]
-            cmd_info.sequences = {}
-            cmd_info.sequences[CMD_TYPE.PIC] = row[5]
-            cmd_info.sequences[CMD_TYPE.TEXT_TAG] = row[6]
-            cmd_info.sequences[CMD_TYPE.TEXT_FORMAT] = row[7]
-            cmd_info.sequences[CMD_TYPE.VOICE] = row[8]
+            cmd_info.sequences = {CMD_TYPE.PIC: row[5], CMD_TYPE.TEXT_TAG: row[6], CMD_TYPE.TEXT_FORMAT: row[7],
+                                  CMD_TYPE.VOICE: row[8]}
         return cmd_info
 
     # reply operation
@@ -135,7 +132,7 @@ class cmdDB:
                                              (cmd_id, reply_type, reply_id, tag, md5,  file_type, reply,              user_id))
         self.conn.commit()
 
-    def get_reply(self, cmd_id, reply_type=0, reply_id=0, get_all=False):
+    def get_reply(self, cmd_id, reply_type=0, reply_id=0, get_all=False, user_id=0):
         reply_info = None
         sql_str = "select type, id, tag, hash, file_type, reply from replies where cmd_id = ?"
         if reply_type > 0:
@@ -145,10 +142,18 @@ class cmdDB:
         if reply_id:
             sql_str += " and id = ?"
 
+        if user_id > 0:
+            sql_str += " and user_id = ?"
+
         if get_all:
             sql_str += " order by id"
+        elif user_id > 0:
+            sql_str += " order by time_used"
 
-        self.db.execute(sql_str, (cmd_id, reply_type, reply_id))
+        arg_list = (cmd_id, reply_type, reply_id)
+        if user_id > 0:
+            arg_list += (user_id, )
+        self.db.execute(sql_str, arg_list)
         if get_all:
             return self.db.fetchall()
         else:
@@ -164,9 +169,17 @@ class cmdDB:
                 reply_info.reply = row[5]
         return reply_info
 
-    def get_reply_by_tag(self, cmd_id, reply_type, tag):
+    def get_reply_by_tag(self, cmd_id, reply_type, tag, user_id=0):
         reply_info = None
-        self.db.execute("select id, tag, hash, file_type, reply from replies where cmd_id = ? and type = ? and tag like '%" + tag + "%' order by time_used", (cmd_id,reply_type))
+        sql_str = "select id, tag, hash, file_type, reply from replies where cmd_id = ? and type = ? and tag like '" + tag + "%'"
+        if user_id > 0:
+            sql_str += " and user_id = ?"
+
+        sql_str += " order by time_used"
+        arg_list = (cmd_id,reply_type)
+        if user_id > 0:
+            arg_list += (user_id, )
+        self.db.execute(sql_str, arg_list)
         row = self.db.fetchone()
         if row:
             reply_info = replyInfo()
@@ -213,6 +226,11 @@ class cmdDB:
 
         self.conn.commit()
 
+    def add_private_reply(self, cmd_id, reply_type, reply_id, user_id, md5="", file_type="", reply="", ):
+        self.db.execute('insert into p_replies(cmd_id,  type,       id,     hash, file_type, reply, stamp,       user_id, time_used) '
+                                      'values(?,      ?,          ?,        ?,   ?,    ?,         ?,     DATE("now"), ?,       0)',
+                                             (cmd_id, reply_type, reply_id, md5, file_type, reply, user_id))
+        self.conn.commit()
 
 
 

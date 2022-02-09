@@ -554,7 +554,6 @@ class reply_server:
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "这个关键词好像用不了捏"
 
-
     def save_ftext_reply(self, cmd, user_qq):
         cmd, arg, reply = self.save_cmd_parse(cmd)
         if len(cmd) and len(reply):
@@ -574,6 +573,10 @@ class reply_server:
             p_cmd = cmd[space_index+1:]
             p_cmd = p_cmd.strip()
             cmd = cmd[0:space_index]
+            if self.checkout(cmd, super_user):
+                self.reply_type = REPLY_TYPE.TEXT
+                self.reply = "关键词【{}】已存在，不可以设置为同义词捏".format(cmd)
+                return
             if self.checkout(p_cmd, super_user):
                 self.db.add_alias(cmd, self.cmd_info.cmd_id, 0, 0)
                 self.reply_type = REPLY_TYPE.TEXT
