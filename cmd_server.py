@@ -92,6 +92,12 @@ class reply_server:
             self.cmd_queue = queue.Queue()
             self.action = Action(jconfig.bot, host=jconfig.host, port=jconfig.port)
 
+    def __del__(self):
+        print("server destroyed")
+    
+    def reply_super(self, reply: str):
+        self.action.sendFriendText(int(super_user), reply)
+
     def enqueue(self, ctx: Union[GroupMsg, FriendMsg]):
         if self.cmd_queue and (isinstance(ctx, FriendMsg) or isinstance(ctx, GroupMsg)):
             self.cmd_queue.put(ctx)
@@ -106,6 +112,7 @@ class reply_server:
                 time.sleep(0.3)
             else:
                 time.sleep(1)
+
 
     def handle_reply(self, ctx: Union[GroupMsg, FriendMsg]):
         if self.action and self.reply_type:
@@ -309,6 +316,10 @@ class reply_server:
         self.reply_at = True
 
     def handle_cmd(self, ctx):
+        if ctx.Content == "_exception":
+            raise Exception('test')
+
+
         self.reply_at = False
         self.reply_type = 0
         self.reply = ""
