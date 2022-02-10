@@ -213,8 +213,13 @@ class cmdDB:
         self.db.execute('update users set permission=? where user_id=?', (permission, user_id))
         self.conn.commit()
 
-    def used_inc(self, user_id, orig_id, cmd_id, reply_type, reply_id):
-        self.db.execute('update replies set time_used = time_used + 1 where cmd_id = ? and type = ? and id = ?', (cmd_id, reply_type, reply_id))
+    def used_inc(self, user_id, orig_id, cmd_id, reply_type, reply_id, private=False):
+        reply_table = ""
+        if private:
+            reply_table = "p_replies"
+        else:
+            reply_table = "replies"
+        self.db.execute('update {} set time_used = time_used + 1 where cmd_id = ? and type = ? and id = ?'.format(reply_table), (cmd_id, reply_type, reply_id))
         try:
             self.db.execute("insert into user_records(user_id, orig_cmd_id, cmd_id, type, reply_id, time_used, first_used, last_used) "
                                               "values(?,       ?,           ?,      ?,    ?,        1,          DATE('now'),DATE('now'))",
@@ -226,11 +231,30 @@ class cmdDB:
 
         self.conn.commit()
 
-    def add_private_reply(self, cmd_id, reply_type, reply_id, user_id, md5="", file_type="", reply="", ):
+    def add_private_reply(self, cmd_id, reply_type, reply_id, user_id, md5="", file_type="", reply=""):
         self.db.execute('insert into p_replies(cmd_id,  type,       id,     hash, file_type, reply, stamp,       user_id, time_used) '
-                                      'values(?,      ?,          ?,        ?,   ?,    ?,         ?,     DATE("now"), ?,       0)',
-                                             (cmd_id, reply_type, reply_id, md5, file_type, reply, user_id))
+                                      'values(?,        ?,          ?,      ?,    ?,         ?,     DATE("now"), ?,       0)',
+                                             (cmd_id,   reply_type, reply_id, md5, file_type, reply,              user_id))
         self.conn.commit()
+
+    def get_private_reply_max_id(self, user_id, cmd_id):
+        self.db.execute('select ifnull(max(id), 0) from p_replies where user_id = ? and cmd_id = ?', (user_id, cmd_id))
+        return self.db.fetchone()[0]
+
+    def get_private_reply(self, user_id, cmd_id):
+        reply_info = None
+        self.db.execute('select type, id, hash, file_type, reply from p_replies where user_id = ? and cmd_id = ? order by time_used', (user_id, cmd_id))
+        row = self.db.fetchone()
+        if row:
+            reply_info = replyInfo()
+            reply_info.cmd_id = cmd_id
+            reply_info.type = row[0]
+            reply_info.reply_id = row[1]
+            reply_info.tag = ""
+            reply_info.md5 = row[2]
+            reply_info.file_type = row[3]
+            reply_info.reply = row[4]
+        return reply_info
 
 
 

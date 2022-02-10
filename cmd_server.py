@@ -279,6 +279,8 @@ class reply_server:
             return self.save_ftext_reply(cmd[4:], user_qq)
         elif re.match("^alias.{1,}", cmd):  # save alias
             return self.save_alias(cmd[5:])
+        elif re.match("^ptxt.{1,}", cmd):  # save private text
+            return self.save_private_text_reply(cmd[4:], user_qq)
 
     def handle_set_cmd(self, cmd, user_qq, target):
         if user_qq != super_user:
@@ -319,7 +321,6 @@ class reply_server:
         if ctx.Content == "_exception":
             raise Exception('test')
 
-
         self.reply_at = False
         self.reply_type = 0
         self.reply = ""
@@ -332,8 +333,11 @@ class reply_server:
             self.group_flag = True
 
         target = None
+        flag_at_me = False
         if ctx.MsgType == "AtMsg":
             target = ctx.target[0]
+            if target == jconfig.bot:
+                flag_at_me = True
 
         if "_save" == ctx.Content[:5]:
             logger.info("Is save cmd")
@@ -372,6 +376,10 @@ class reply_server:
         if not checkout_good:
             return
 
+        if flag_at_me:
+            self.reply_at=True
+            return self.random_private_text()
+
         if pic_flag:
             self.cmd_info.cmd_type = CMD_TYPE.PIC
 
@@ -402,22 +410,23 @@ class reply_server:
         elif cmd_type == CMD_TYPE.VOICE:
             self.random_voice(arg)
 
-    def random_text(self, tag):
-        reply_info = None
+    def random_text(self, tag, user_id=0):
         if len(tag):
             reply_info = self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, tag)
         else:
             reply_id = random.randint(1, self.cmd_info.sequences[CMD_TYPE.TEXT_TAG])
-            reply_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, reply_id)
+            reply_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, reply_id, user_id)
 
         if reply_info:
             self.reply = reply_info.reply
             self.reply_type = REPLY_TYPE.TEXT
             self.db.used_inc(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
                              CMD_TYPE.TEXT_TAG, reply_info.reply_id)
+        elif user_id:
+            self.reply = "你好像没有设置私人回复捏"
+            self.reply_type = REPLY_TYPE.TEXT
 
     def random_ftext(self, arg):
-        reply_info = None
         if len(arg) == 0:
             return
         else:
@@ -431,7 +440,6 @@ class reply_server:
                              CMD_TYPE.TEXT_FORMAT, reply_info.reply_id)
 
     def _random_pic(self, tag) -> replyInfo:
-        reply_info = None
         if len(tag):
             reply_info = self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.PIC, tag)
         else:
@@ -631,6 +639,32 @@ class reply_server:
 
         self.reply = reports
 
+    def save_private_text_reply(self, cmd, user_qq):
+        logger.info('saving {}'.format(cmd))
+        cmd, tag, reply = self.save_cmd_parse(cmd)
+        if len(cmd) and reply and len(reply):
+            if self.checkout(cmd, user_qq, cmd_type=CMD_TYPE.TEXT_TAG, create=True):
+                max_id = self.db.get_private_reply_max_id(self.user_info.user_id, self.cmd_info.cmd_id)
+                if max_id == 0:
+                    max_id = 10001
+                else:
+                    max_id += 1
+                self.db.add_private_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, max_id, user_id=self.user_info.user_id, reply=reply)
+                self.reply_type = REPLY_TYPE.TEXT
+                self.reply = "私人回复存储成功，{}({}):{}".format(cmd, tag, reply)
+            else:
+                self.reply_type = REPLY_TYPE.TEXT
+                self.reply = "这个关键词好像用不了捏"
+
+    def random_private_text(self):
+        reply_info = self.db.get_private_reply(self.user_info.user_id, self.cmd_info.cmd_id)
+        if reply_info:
+            self.reply = reply_info.reply
+            self.reply_type = REPLY_TYPE.TEXT
+            self.db.used_inc(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
+                             CMD_TYPE.TEXT_TAG, reply_info.reply_id, private=True)
+        else:
+            self.random_text(private=True)
 
 
 
