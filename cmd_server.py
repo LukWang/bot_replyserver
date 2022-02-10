@@ -83,7 +83,7 @@ class reply_server:
         self.user_info = None
         self.use_md5 = 1
         self.group_flag = True
-        self.reply_at = False
+        self.reply_at = 0
         self.running = False
         if is_session:
             self.cmd_queue = None
@@ -315,13 +315,13 @@ class reply_server:
         self.get_user(user_qq)
         self.reply_type = REPLY_TYPE.TEXT
         self.reply = "你的权限为:【{}】".format(self.user_info.permission)
-        self.reply_at = True
+        self.reply_at = int(user_qq)
 
     def handle_cmd(self, ctx):
         if ctx.Content == "_exception":
             raise Exception('test')
 
-        self.reply_at = False
+        self.reply_at = 0
         self.reply_type = 0
         self.reply = ""
         user_qq = ""
@@ -377,7 +377,7 @@ class reply_server:
             return
 
         if flag_at_me:
-            self.reply_at=True
+            self.reply_at=int(user_qq)
             return self.random_private_text()
 
         if pic_flag:
