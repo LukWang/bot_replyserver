@@ -664,7 +664,7 @@ class reply_server:
             self.db.used_inc(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
                              CMD_TYPE.TEXT_TAG, reply_info.reply_id, private=True)
         else:
-            self.random_text(private=True)
+            self.random_text(tag="", user_id=self.user_info.user_id)
 
 
 
