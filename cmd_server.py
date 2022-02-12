@@ -22,6 +22,14 @@ class PicObj:
     tag: str
     reply: str
 
+    def __init__(self):
+        self.user = ""
+        self.Url = ""
+        self.Md5 = ""
+        self.cmd = ""
+        self.tag = ""
+        self.reply = ""
+
 
 cur_file_dir = os.path.dirname(os.path.realpath(__file__))
 pic_dir = ""
@@ -205,6 +213,7 @@ class reply_server:
         self.cmd_info = self.db.get_real_cmd(cmd)  # handle alias
 
         if self.cmd_info:
+            print(f"content:{self.cmd_info.cmd}")
             self.cur_dir = os.path.join(pic_dir, self.cmd_info.cmd)
         else:
             self.cur_dir = os.path.join(pic_dir, cmd)
@@ -309,7 +318,7 @@ class reply_server:
             if cmds is None:
                 return
             for cmd in cmds:
-                if cmd.active and cmd.level < self.user_info.permission:
+                if cmd.active and cmd.level < self.user_info.permission and not cmd.private:
                     if cmd.orig_id == 0:
                         if re.match("^_.*", cmd.cmd):
                             continue
@@ -409,10 +418,6 @@ class reply_server:
         user_qq = ""
         group_qq = ""
 
-        if ctx.MsgType == MsgTypes.PicMsg:
-            pic_obj = self.parse_pic(ctx)
-            if len(pic_obj.cmd):
-                return self.save_pic(pic_obj)
 
         if isinstance(ctx, FriendMsg):
             user_qq = str(ctx.FromUin)
@@ -421,6 +426,12 @@ class reply_server:
             user_qq = str(ctx.FromUserId)
             group_qq = str(ctx.FromGroupId)
             self.group_flag = True
+
+        if ctx.MsgType == MsgTypes.PicMsg:
+            pic_obj = self.parse_pic(ctx)
+            if len(pic_obj.cmd):
+                if self.checkout(pic_obj.cmd, user_qq, cmd_type=CMD_TYPE.PIC, create=True):
+                    return self.save_pic(pic_obj)
 
         target = None
         flag_at_me = False
@@ -508,7 +519,7 @@ class reply_server:
         reply_info = None
         if len(tag):
             replies = self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, tag)
-            count = replies.count()
+            count = len(replies)
             if count > 0:
                 ind = random.randint(1, count) - 1
                 reply_info = replies[ind]
@@ -542,7 +553,7 @@ class reply_server:
         reply_info = None
         if len(tag):
             replies = self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.PIC, tag)
-            count = replies.count()
+            count = len(replies)
             if count > 0:
                 ind = random.randint(1, count) - 1
                 reply_info = replies[ind]
@@ -566,6 +577,7 @@ class reply_server:
         if pic_info:
             self.reply=pic_info.md5
             self.reply_type = REPLY_TYPE.PIC_MD5
+            self.reply2 = pic_info.reply
 
     def random_pic_path(self, tag):
         pic_info = self._random_pic(tag)
@@ -575,6 +587,7 @@ class reply_server:
             file_name = os.path.join(self.cur_dir,file_name)
             self.reply=file_name
             self.reply_type = REPLY_TYPE.PIC_PATH
+            self.reply2 = pic_info.reply
 
     def random_voice(self, tag):
         voice_info = None
@@ -599,7 +612,6 @@ class reply_server:
             img_type = type_str[len(prefix):]
         return img_type
 
-    @staticmethod
     def parse_pic(self, ctx: Union[GroupMsg, FriendMsg]) -> PicObj:
         if ctx.MsgType != MsgTypes.PicMsg:
             return None
@@ -667,14 +679,19 @@ class reply_server:
         if space_index > 0:
             arg = cmd[space_index + 1:]
             cmd = cmd[0:space_index]
+        
+        if arg == "":
+            space_index = cmd.find('reply')
+            if space_index >= 0:
+                reply = reply[space_index+5:]
+                cmd = cmd[:space_index]
+                cmd = cmd.strip()
         else:
-            return cmd, arg, reply
-
-        space_index = arg.find(' reply')
-        if space_index >= 0:
-            reply = arg[space_index+6:]
-            arg = arg[0:space_index]
-            arg = arg.strip()
+            space_index = arg.find('reply')
+            if space_index >= 0:
+                reply = arg[space_index+5:]
+                arg = arg[0:space_index]
+                arg = arg.strip()
 
         return cmd, arg, reply
 
@@ -786,8 +803,9 @@ class reply_server:
 
     def random_private_text(self):
         replies = self.db.get_private_reply(self.user_info.user_id, self.cmd_info.cmd_id)
-        count = replies.count()
+        count = len(replies)
         if count > 0:
+            print(f"count{count}")
             ind = random.randint(1, count) - 1
             self.reply = replies[ind].reply
             self.reply_type = REPLY_TYPE.TEXT

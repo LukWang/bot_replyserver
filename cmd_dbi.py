@@ -137,7 +137,7 @@ class cmdDB:
     def get_real_cmd(self, cmd):
         orig_cmd_id = 0
         cmd_info = None
-        self.db.execute("select id, p_cmd_id, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8, cmd from cmd_alias where cmd = ?", (cmd,))
+        self.db.execute("select id, p_cmd_id, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8, cmd, private from cmd_alias where cmd = ?", (cmd,))
         row = self.db.fetchone()
         if row:
             orig_cmd_id = row[0]
