@@ -157,6 +157,14 @@ class reply_server:
     def reply_super(self, reply: str):
         self.action.sendFriendText(int(super_user), reply)
 
+    def check_admin(self, user_qq):
+        if user_qq == super_user:
+            return True
+        else:
+            self.reply_type = REPLY_TYPE.TEXT
+            self.reply = "主人说不可以听陌生人的话捏"
+            return False
+
     def enqueue(self, ctx: Union[GroupMsg, FriendMsg]):
         if self.cmd_queue and (isinstance(ctx, FriendMsg) or isinstance(ctx, GroupMsg)):
             self.cmd_queue.put(ctx)
@@ -222,6 +230,8 @@ class reply_server:
             self.reply = "{}类型变为:{}".format(cmd, cmd_type)
 
     def set_cmd_active(self, cmd, active, user_qq: str, group_qq: str):
+        if not self.check_admin(user_qq):
+            return
         self.reply_type = REPLY_TYPE.TEXT
         if self.checkout(cmd, user_qq, check_active=False):
             if self.cmd_info.cmd_type == CMD_TYPE.PLUGIN and group_qq != "":
@@ -264,6 +274,17 @@ class reply_server:
             g_user_cache[target_qq].permission = permission
             self.reply_type = REPLY_TYPE.TEXT
             self.reply = "用户【{}】，权限已修改为【{}】".format(target_qq, permission)
+
+    def rename_cmd(self, cmd, user_qq):
+        cmd, arg = self.get_next_arg(cmd)
+        if self.checkout(cmd, user_qq, check_active=False):
+            if not self.db.get_real_cmd(arg):  # check if to arg already exists
+                self.db.rename_cmd(self.cmd_info.cmd_id, arg)
+                self.reply_type = REPLY_TYPE.TEXT
+                self.reply = "重命名关键词【{}】->关键词【{}】".format(cmd, arg)
+            else:
+                self.reply_type = REPLY_TYPE.TEXT
+                self.reply = "关键词【{}】已存在，无法重命名".format(arg)
 
     def list_all_cmd(self, user_qq):
         output_text = ""
@@ -335,9 +356,7 @@ class reply_server:
             return self.save_private_text_reply(cmd[4:], user_qq)
 
     def handle_set_cmd(self, cmd, user_qq, target):
-        if user_qq != super_user:
-            self.reply_type = REPLY_TYPE.TEXT
-            self.reply = "主人说不可以听陌生人的话捏".format(cmd)
+        if not self.check_admin(user_qq):
             return
 
         if re.match("^cmd", cmd):
@@ -370,9 +389,6 @@ class reply_server:
         self.reply_at = int(user_qq)
 
     def handle_cmd(self, ctx):
-        if ctx.Content == "_exception":
-            raise Exception('test')
-
         self.reply_at = 0
         self.reply_type = 0
         self.reply = ""
@@ -392,11 +408,11 @@ class reply_server:
             target = ctx.target[0]
             if target == jconfig.bot:
                 flag_at_me = True
+
         if "帮助" == ctx.Content:
             self.help(group_qq)
 
-        if "_save" == ctx.Content[:5]:
-            logger.info("Is save cmd")
+        if re.match("^_save.{1,}", ctx.Content):
             return self.handle_save_cmd(ctx.Content[5:], user_qq)
         elif re.match("^_set.{1,}", ctx.Content):
             return self.handle_set_cmd(ctx.Content[4:], user_qq, target)
@@ -410,6 +426,8 @@ class reply_server:
             return self.handle_check_cmd(ctx.Content[6:], user_qq)
         elif ctx.Content == "_scanvoice":
             return self.scan_voice_dir()
+        elif re.match("^_rename.{1,}", ctx.Content):
+            return self.rename_cmd(ctx.Content[7:], user_qq)
 
         arg = ""
         checkout_good = False

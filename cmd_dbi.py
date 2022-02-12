@@ -124,6 +124,10 @@ class cmdDB:
         self.db.execute('update cmd_alias set level = ? where id = ?', (level, cmd_id))
         self.conn.commit()
 
+    def rename_cmd(self, cmd_id, new_name):
+        self.db.execute('update cmd_alias set cmd = ? where id = ?', (new_name, cmd_id))
+        self.conn.commit()
+
     def get_real_cmd(self, cmd):
         orig_cmd_id = 0
         cmd_info = None
