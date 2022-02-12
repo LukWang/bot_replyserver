@@ -51,7 +51,7 @@ def get_user(user_qq):
     user_info = None
     if user_qq in g_user_cache:
         user_info = g_user_cache[user_qq]
-        logger.info("Cached qq：{} id：{} perm: {}".format(user_qq, user_info.user_id, user_info.permission))
+        logger.debug("Cached qq：{} id：{} perm: {}".format(user_qq, user_info.user_id, user_info.permission))
     else:
         db = cmdDB()
         user_info = db.get_user(user_qq)
@@ -70,17 +70,17 @@ def get_group(group_qq: str):
     group_info = None
     if group_qq in g_group_cache:
         group_info = g_group_cache[group_qq]
-        logger.info("get cached group_info qq:{}, enable:{}".format(group_qq, group_info.enable))
+        logger.debug("get cached group_info qq:{}, enable:{}".format(group_qq, group_info.enable))
     else:
         db = cmdDB()
         group_info = db.get_group(group_qq)
         if group_info:
-            g_user_cache[group_qq] = group_info
+            g_group_cache[group_qq] = group_info
         else:
             db.add_group(group_qq)
             group_info = db.get_group(group_qq)
             if group_info:
-                g_user_cache[group_qq] = group_info
+                g_group_cache[group_qq] = group_info
 
     return group_info
 
