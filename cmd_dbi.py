@@ -18,6 +18,7 @@ class CMD_TYPE:
     TEXT_TAG = 2
     TEXT_FORMAT = 4
     VOICE = 8
+    PLUGIN = 1000
 
 
 class cmdInfo:
@@ -51,6 +52,12 @@ class userInfo:
     user_id: int
     permission: int
     qq: str
+
+
+class groupInfo:
+    group_id: int
+    enable: int
+    qq: str
     
 
 class cmdDB:
@@ -68,8 +75,11 @@ class cmdDB:
     def make_parent(self, cmd):
         self.db.execute("update cmd_alias set p_cmd_id = 0 where cmd = ?", (cmd, ))
 
-    def set_cmd_active(self, cmd, active):
-        self.db.execute('update cmd_alias set active = ? where cmd = ?', (active, cmd))
+    def set_cmd_active(self, cmd, cmd_id, active):
+        if cmd_id:
+            self.db.execute('update cmd_alias set active = ? where id = ?', (active, cmd_id))
+        else:
+            self.db.execute('update cmd_alias set active = ? where cmd = ?', (active, cmd))
         self.conn.commit()
 
     def get_all_cmd(self):
@@ -255,6 +265,38 @@ class cmdDB:
             reply_info.file_type = row[3]
             reply_info.reply = row[4]
         return reply_info
+
+    def add_group(self, group_qq):
+        self.db.execute(
+            'insert into groups(group_vendor_id, enable) values(?, 1)', (group_qq,))
+        self.conn.commit()
+
+    def get_group(self, group_qq):
+        group_info = None
+        self.db.execute('select group_id, enable from groups where group_vendor_id = ?', (group_qq,))
+        row = self.db.fetchone()
+        if row:
+            group_info = groupInfo()
+            group_info.group_id = row[0]
+            group_info.enable = row[1]
+            group_info.qq = group_qq
+
+        return group_info
+
+    def set_group_cmd_status(self, group_id, cmd_id, enable):
+        try:
+            self.db.execute("insert into group_cmd_sup(group_id, cmd_id, enable) values(?, ?, ?)", (group_id, cmd_id, enable))
+        except sqlite3.DatabaseError:
+            self.db.execute("update group_cmd_sup set enable = ? where group_id=? and cmd_id=?",(enable, group_id, cmd_id))
+        self.conn.commit()
+
+    def is_group_cmd_enabled(self, group_id, cmd_id):
+        self.db.execute('select enable from group_cmd_sup where group_id = ? and cmd_id = ?', (group_id,cmd_id))
+        row = self.db.fetchone()
+        if row:
+            return row[0]
+        else:
+            return None
 
 
 

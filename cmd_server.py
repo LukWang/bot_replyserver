@@ -1,5 +1,6 @@
 import json
-import os, random
+import os
+import random
 import time
 
 from botoy import logger, GroupMsg, FriendMsg, jconfig, Action
@@ -9,7 +10,7 @@ import re
 import queue
 from typing import Union
 
-from .cmd_dbi import cmdDB, cmdInfo, replyInfo, CMD_TYPE, userInfo
+from .cmd_dbi import cmdDB, cmdInfo, replyInfo, CMD_TYPE, userInfo, groupInfo
 
 
 class PicObj:
@@ -33,7 +34,7 @@ except:
 
 
 g_user_cache = {}
-g_app_cache = {}
+g_group_cache = {}
 
 
 class REPLY_TYPE:
@@ -44,6 +45,44 @@ class REPLY_TYPE:
 
 
 CMD_TYPE_LIST = [CMD_TYPE.PIC, CMD_TYPE.TEXT_TAG, CMD_TYPE.TEXT_FORMAT, CMD_TYPE.VOICE]
+
+
+def get_user(user_qq):
+    user_info = None
+    if user_qq in g_user_cache:
+        user_info = g_user_cache[user_qq]
+        logger.info("Cached qq：{} id：{} perm: {}".format(user_qq, user_info.user_id, user_info.permission))
+    else:
+        db = cmdDB()
+        user_info = db.get_user(user_qq)
+        if user_info:
+            g_user_cache[user_qq] = user_info
+        else:
+            db.add_user(user_qq)
+            user_info = db.get_user(user_qq)
+            if user_info:
+                g_user_cache[user_qq] = user_info
+
+    return user_info
+
+
+def get_group(group_qq: str):
+    group_info = None
+    if group_qq in g_group_cache:
+        group_info = g_group_cache[group_qq]
+        logger.info("get cached group_info qq:{}, enable:{}".format(group_qq, group_info.enable))
+    else:
+        db = cmdDB()
+        group_info = db.get_group(group_qq)
+        if group_info:
+            g_user_cache[group_qq] = group_info
+        else:
+            db.add_group(group_qq)
+            group_info = db.get_group(group_qq)
+            if group_info:
+                g_user_cache[group_qq] = group_info
+
+    return group_info
 
 
 class Selector:
@@ -113,7 +152,6 @@ class reply_server:
             else:
                 time.sleep(1)
 
-
     def handle_reply(self, ctx: Union[GroupMsg, FriendMsg]):
         if self.action and self.reply_type:
             if self.group_flag:
@@ -126,25 +164,11 @@ class reply_server:
                 elif self.reply_type == REPLY_TYPE.VOICE:
                     self.action.sendGroupVoice(ctx.FromGroupId, voiceBase64Buf=file_to_base64(self.reply))
 
-    def get_user(self, user_qq):
-        if user_qq in g_user_cache:
-            self.user_info = g_user_cache[user_qq]
-            logger.debug("用户：{} id：{} perm: {}".format(user_qq, self.user_info.user_id, self.user_info.permission))
-        else:
-            self.user_info = self.db.get_user(user_qq)
-            if self.user_info:
-                g_user_cache[user_qq] = self.user_info
-            else:
-                self.db.add_user(user_qq)
-                self.user_info = self.db.get_user(user_qq)
-                if self.user_info:
-                    g_user_cache[user_qq] = self.user_info
-                else:
-                    return False
+    def checkout(self, cmd: str, user_qq: str, cmd_type=0, create=False, check_active=True):
+        self.user_info = get_user(user_qq)
+        if not self.user_info:
+            return False
 
-        return True
-
-    def checkout(self, cmd: str, user_qq: str, cmd_type=0, create=False):
         cmd = cmd.upper()
         self.cmd_info = self.db.get_real_cmd(cmd)  # handle alias
 
@@ -157,14 +181,11 @@ class reply_server:
             if create:
                 if not os.path.exists(self.cur_dir) and (cmd_type & CMD_TYPE.PIC):
                     os.mkdir(self.cur_dir)
-                cmd_id = self.db.add_alias(cmd, 0, cmd_type, 0)
-                self.cmd_info = self.db.get_real_cmd(cmd)
+                self.cmd_info = self.db.add_alias(cmd, 0, cmd_type, 0)
             else:
                 return False
 
-        if not self.get_user(user_qq):
-            return False
-        if self.cmd_info.active == 0 or self.user_info.permission < self.cmd_info.level:
+        if (check_active and self.cmd_info.active == 0) or self.user_info.permission < self.cmd_info.level:
             return False
 
         return True
@@ -180,15 +201,24 @@ class reply_server:
             self.reply_type = REPLY_TYPE.TEXT
             self.reply = "{}类型变为:{}".format(cmd, cmd_type)
 
-    def set_cmd_active(self, cmd, active, user_qq):
-        
+    def set_cmd_active(self, cmd, active, user_qq: str, group_qq: str):
         self.reply_type = REPLY_TYPE.TEXT
-
-        self.db.set_cmd_active(cmd, active)
-        if active == 0:
-            self.reply = "关键词【{}】已禁用".format(cmd)
+        if self.checkout(cmd, user_qq, check_active=False):
+            if self.cmd_info.cmd_type == CMD_TYPE.PLUGIN and group_qq != "":
+                group_info = get_group(group_qq)
+                self.db.set_group_cmd_status(group_info.group_id, self.cmd_info.cmd_id, active)
+                if active == 0:
+                    self.reply = "群功能【{}】已禁用".format(cmd)
+                else:
+                    self.reply = "群功能【{}】已启用".format(cmd)
+            else:
+                self.db.set_cmd_active(cmd, self.cmd_info.cmd_id, active)
+                if active == 0:
+                    self.reply = "关键词【{}】已禁用".format(cmd)
+                else:
+                    self.reply = "关键词【{}】已启用".format(cmd)
         else:
-            self.reply = "关键词【{}】已启用".format(cmd)
+            self.reply = "关键词【{}】不存在".format(cmd)
 
     def set_cmd_level(self, cmd, level):
         if cmd and level:
@@ -207,9 +237,10 @@ class reply_server:
         if not permission:
             return
 
-        if self.get_user(target_qq):
+        user_info = get_user(target_qq)
+        if user_info:
             permission = int(permission)
-            self.db.set_user_permission(self.user_info.user_id, permission)
+            self.db.set_user_permission(user_info.user_id, permission)
             g_user_cache[target_qq].permission = permission
             self.reply_type = REPLY_TYPE.TEXT
             self.reply = "用户【{}】，权限已修改为【{}】".format(target_qq, permission)
@@ -217,7 +248,8 @@ class reply_server:
     def list_all_cmd(self, user_qq):
         output_text = ""
         output_list = {}
-        if self.get_user(user_qq):
+        self.user_info = get_user(user_qq)
+        if self.user_info:
             cmds = self.db.get_all_cmd()
             if cmds is None:
                 return
@@ -312,7 +344,7 @@ class reply_server:
             self.check_user(user_qq)
 
     def check_user(self, user_qq):
-        self.get_user(user_qq)
+        self.user_info = get_user(user_qq)
         self.reply_type = REPLY_TYPE.TEXT
         self.reply = "你的权限为:【{}】".format(self.user_info.permission)
         self.reply_at = int(user_qq)
@@ -325,11 +357,13 @@ class reply_server:
         self.reply_type = 0
         self.reply = ""
         user_qq = ""
+        group_qq = ""
         if isinstance(ctx, FriendMsg):
             user_qq = str(ctx.FromUin)
             self.group_flag = False
         elif isinstance(ctx, GroupMsg):
             user_qq = str(ctx.FromUserId)
+            group_qq = str(ctx.FromGroupId)
             self.group_flag = True
 
         target = None
@@ -347,9 +381,9 @@ class reply_server:
         elif ctx.Content == "_listcmd":
             return self.list_all_cmd(user_qq)
         elif re.match("^_disable.{1,}", ctx.Content):
-            return self.set_cmd_active(ctx.Content[8:], 0, user_qq)
+            return self.set_cmd_active(ctx.Content[8:], 0, user_qq, group_qq)
         elif re.match("^_enable.{1,}", ctx.Content):
-            return self.set_cmd_active(ctx.Content[7:], 1, user_qq)
+            return self.set_cmd_active(ctx.Content[7:], 1, user_qq, group_qq)
         elif re.match("^_check.{1,}", ctx.Content):
             return self.handle_check_cmd(ctx.Content[6:], user_qq)
         elif ctx.Content == "_scanvoice":
@@ -590,11 +624,6 @@ class reply_server:
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "同义词设置成功:{} = {}".format(cmd, p_cmd)
 
-    def app_usage(self, app: str, user_qq):
-        if self.checkout(app, user_qq, create=True, cmd_type=1000):
-            self.db.used_inc(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
-                             1000, 1)
-
     @staticmethod
     def split_file_type(file_name: str):
         ext_ind = file_name.rfind('.')
@@ -663,8 +692,45 @@ class reply_server:
             self.reply_type = REPLY_TYPE.TEXT
             self.db.used_inc(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
                              CMD_TYPE.TEXT_TAG, reply_info.reply_id, private=True)
+
+
+class plugin_manager:
+    def __init__(self, name: str, cmd_id=0):
+        self.plugin_name = name.upper()
+        self.cmd_id = cmd_id
+        self.db = self.db = cmdDB()
+
+    def checkout(self, group_qq: int, create=True) -> bool:
+        group_info = get_group(str(group_qq))
+        if not group_info:
+            return False
+
+        cmd_info = self.db.get_real_cmd(self.plugin_name)
+        if not cmd_info:
+            if create:
+                cmd_info = self.db.add_alias(self.plugin_name, 0, CMD_TYPE.PLUGIN, 0)
+
+        self.cmd_id = cmd_info.cmd_id
+        ret = self.db.is_group_cmd_enabled(group_info.group_id, self.cmd_id)
+        if ret:
+            return True
+        elif not ret and ret != 0:  # returns None then create one
+            self.db.set_group_cmd_status(group_info.group_id, self.cmd_id, 1)
+            return True
         else:
-            self.random_text(tag="", user_id=self.user_info.user_id)
+            return False
+
+    def bind(self, ctx: GroupMsg) -> bool:
+        if not isinstance(ctx, GroupMsg):
+            return False
+        return self.checkout(ctx.FromGroupId, create=True)
+
+    def app_usage(self, user_qq):
+        user_info = get_user(user_qq)
+        if user_info:
+            self.db.used_inc(user_info.user_id, self.cmd_id, self.cmd_id, 1000, 1)
+
+
 
 
 
