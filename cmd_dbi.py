@@ -29,6 +29,7 @@ class cmdInfo:
     cmd_type: int  # a bit map indicating supported reply type
     level: int  # permission level, default 1
     sequences: dict
+    private: int
 
 
 class replyInfo:
@@ -66,9 +67,9 @@ class cmdDB:
         self.db = self.conn.cursor()
 
     # alias operations
-    def add_alias(self, new_cmd, parent, reply_type, level):
-        self.db.execute("insert into cmd_alias(cmd, p_cmd_id, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8) "
-                                       "values(?,   ?,        1,      ?,    ?,     0, 0, 0, 0)", (new_cmd, parent, reply_type, level))
+    def add_alias(self, new_cmd, parent, reply_type, level, private):
+        self.db.execute("insert into cmd_alias(cmd, p_cmd_id, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8, private) "
+                                       "values(?,   ?,        1,      ?,    ?,     0, 0, 0, 0, ?)", (new_cmd, parent, reply_type, level, private))
         self.conn.commit()
         return self.get_real_cmd(new_cmd)
 
@@ -85,7 +86,7 @@ class cmdDB:
     def get_all_cmd(self, cmd_type=0):
         cmds = []
         param = None
-        sql = "select id, p_cmd_id, cmd, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8 from cmd_alias"
+        sql = "select id, p_cmd_id, cmd, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8, private from cmd_alias"
         if cmd_type == 0:
             sql += " where type < ?"
             param = (CMD_TYPE.PLUGIN,)
@@ -108,6 +109,7 @@ class cmdDB:
                 cmd_info.level = row[5]
                 cmd_info.sequences = {CMD_TYPE.PIC: row[6], CMD_TYPE.TEXT_TAG: row[7], CMD_TYPE.TEXT_FORMAT: row[8],
                                       CMD_TYPE.VOICE: row[9]}
+                cmd_info.private = row[10]
                 cmds.append(cmd_info)
 
         return cmds
@@ -128,6 +130,10 @@ class cmdDB:
         self.db.execute('update cmd_alias set cmd = ? where id = ?', (new_name, cmd_id))
         self.conn.commit()
 
+    def set_cmd_private(self, cmd_id, private):
+        self.db.execute('update cmd_alias set private = ? where id = ?', (private, cmd_id))
+        self.conn.commit()
+
     def get_real_cmd(self, cmd):
         orig_cmd_id = 0
         cmd_info = None
@@ -136,7 +142,7 @@ class cmdDB:
         if row:
             orig_cmd_id = row[0]
         while row and row[1] > 0 and row[2] != 0:
-            self.db.execute("select id, p_cmd_id, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8, cmd from cmd_alias where id = ?", (row[1],))
+            self.db.execute("select id, p_cmd_id, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8, cmd, private from cmd_alias where id = ?", (row[1],))
             row = self.db.fetchone()
         if row:
             cmd_info = cmdInfo()
@@ -148,6 +154,7 @@ class cmdDB:
             cmd_info.level = row[4]
             cmd_info.sequences = {CMD_TYPE.PIC: row[5], CMD_TYPE.TEXT_TAG: row[6], CMD_TYPE.TEXT_FORMAT: row[7],
                                   CMD_TYPE.VOICE: row[8]}
+            cmd_info.private = row[10]
         return cmd_info
 
     # reply operation
@@ -195,7 +202,7 @@ class cmdDB:
         return reply_info
 
     def get_reply_by_tag(self, cmd_id, reply_type, tag, user_id=0):
-        reply_info = None
+        replies = []
         sql_str = "select id, tag, hash, file_type, reply from replies where cmd_id = ? and type = ? and tag like '" + tag + "%'"
         if user_id > 0:
             sql_str += " and user_id = ?"
@@ -205,7 +212,7 @@ class cmdDB:
         if user_id > 0:
             arg_list += (user_id, )
         self.db.execute(sql_str, arg_list)
-        row = self.db.fetchone()
+        row = self.db.fetchall()
         if row:
             reply_info = replyInfo()
             reply_info.cmd_id = cmd_id
@@ -215,7 +222,8 @@ class cmdDB:
             reply_info.md5 = row[2]
             reply_info.file_type = row[3]
             reply_info.reply = row[4]
-        return reply_info
+            replies.append(reply_info)
+        return replies
 
     # user operations
     def add_user(self, user_qq):
@@ -266,11 +274,11 @@ class cmdDB:
         self.db.execute('select ifnull(max(id), 0) from p_replies where user_id = ? and cmd_id = ?', (user_id, cmd_id))
         return self.db.fetchone()[0]
 
-    def get_private_reply(self, user_id, cmd_id):
-        reply_info = None
+    def get_private_reply(self, user_id, cmd_id) -> list:
+        replies = []
         self.db.execute('select type, id, hash, file_type, reply from p_replies where user_id = ? and cmd_id = ? order by time_used', (user_id, cmd_id))
-        row = self.db.fetchone()
-        if row:
+        rows = self.db.fetchall()
+        for row in rows:
             reply_info = replyInfo()
             reply_info.cmd_id = cmd_id
             reply_info.type = row[0]
@@ -279,7 +287,16 @@ class cmdDB:
             reply_info.md5 = row[2]
             reply_info.file_type = row[3]
             reply_info.reply = row[4]
-        return reply_info
+            replies.append(reply_info)
+        return replies
+
+    def list_private_cmds(self, user_id) -> list:
+        cmd_ids = []
+        self.db.execute('select distinct cmd_id from p_replies where user_id = ?', (user_id, ))
+        rows = self.db.fetchall()
+        for row in rows:
+            cmd_ids.append(row[0])
+        return cmd_ids
 
     def add_group(self, group_qq):
         self.db.execute(

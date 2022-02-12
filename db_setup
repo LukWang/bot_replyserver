@@ -13,3 +13,4 @@ CREATE TABLE if not exists groups(group_id INTEGER PRIMARY KEY AUTOINCREMENT, gr
 CREATE UNIQUE INDEX if not exists group_idx0 on groups(group_vendor_id)
 CREATE TABLE if not exists group_cmd_sup(group_id INTEGER, cmd_id INTEGER, enable INTEGER)
 CREATE UNIQUE INDEX if not exists group_cmd_sup_idx0 on group_cmd_sup(group_id, cmd_id)
+ALTER TABLE cmd_alias add column private INTEGER

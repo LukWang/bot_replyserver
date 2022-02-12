@@ -3,7 +3,8 @@ import os
 import random
 import time
 
-from botoy import logger, GroupMsg, FriendMsg, jconfig, Action
+from botoy import logger, GroupMsg, FriendMsg, jconfig, Action, MsgTypes
+from botoy.parser import group, friend
 from botoy.utils import file_to_base64
 import httpx
 import re
@@ -17,6 +18,9 @@ class PicObj:
     user: str
     Url: str
     Md5: str
+    cmd: str
+    tag: str
+    reply: str
 
 
 cur_file_dir = os.path.dirname(os.path.realpath(__file__))
@@ -192,12 +196,12 @@ class reply_server:
                 elif self.reply_type == REPLY_TYPE.VOICE:
                     self.action.sendGroupVoice(ctx.FromGroupId, voiceBase64Buf=file_to_base64(self.reply))
 
-    def checkout(self, cmd: str, user_qq: str, cmd_type=0, create=False, check_active=True):
+    def checkout(self, cmd: str, user_qq: str, cmd_type=0, create=False, check_active=True, private=0):
         self.user_info = get_user(user_qq)
         if not self.user_info:
             return False
 
-        cmd = cmd.upper()
+        cmd = cmd.upper()  # cmd is case insensitive
         self.cmd_info = self.db.get_real_cmd(cmd)  # handle alias
 
         if self.cmd_info:
@@ -209,12 +213,17 @@ class reply_server:
             if create:
                 if not os.path.exists(self.cur_dir) and (cmd_type & CMD_TYPE.PIC):
                     os.mkdir(self.cur_dir)
-                self.cmd_info = self.db.add_alias(cmd, 0, cmd_type, 0)
+                self.cmd_info = self.db.add_alias(cmd, 0, cmd_type, 0, private)
             else:
                 return False
 
+        # Availability check
         if (check_active and self.cmd_info.active == 0) or self.user_info.permission < self.cmd_info.level:
             return False
+
+        # if cmd is private before, make it public
+        if create and private == 0 and self.cmd_info.private == 1:
+            self.db.set_cmd_private(self.cmd_info.cmd_id, 0)
 
         return True
 
@@ -290,6 +299,7 @@ class reply_server:
         else:
             self.reply_type = REPLY_TYPE.TEXT
             self.reply = "关键词【{}】不存在".format(cmd)
+
     def list_all_cmd(self, user_qq):
         output_text = ""
         output_list = {}
@@ -398,6 +408,12 @@ class reply_server:
         self.reply = ""
         user_qq = ""
         group_qq = ""
+
+        if ctx.MsgType == MsgTypes.PicMsg:
+            pic_obj = self.parse_pic(ctx)
+            if len(pic_obj.cmd):
+                return self.save_pic(pic_obj)
+
         if isinstance(ctx, FriendMsg):
             user_qq = str(ctx.FromUin)
             self.group_flag = False
@@ -489,8 +505,13 @@ class reply_server:
             self.random_voice(arg)
 
     def random_text(self, tag, user_id=0):
+        reply_info = None
         if len(tag):
-            reply_info = self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, tag)
+            replies = self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, tag)
+            count = replies.count()
+            if count > 0:
+                ind = random.randint(1, count) - 1
+                reply_info = replies[ind]
         else:
             reply_id = random.randint(1, self.cmd_info.sequences[CMD_TYPE.TEXT_TAG])
             reply_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, reply_id, user_id)
@@ -518,8 +539,13 @@ class reply_server:
                              CMD_TYPE.TEXT_FORMAT, reply_info.reply_id)
 
     def _random_pic(self, tag) -> replyInfo:
+        reply_info = None
         if len(tag):
-            reply_info = self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.PIC, tag)
+            replies = self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.PIC, tag)
+            count = replies.count()
+            if count > 0:
+                ind = random.randint(1, count) - 1
+                reply_info = replies[ind]
         else:
             reply_id = random.randint(1, self.cmd_info.sequences[CMD_TYPE.PIC])
             reply_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.PIC, reply_id)
@@ -573,7 +599,31 @@ class reply_server:
             img_type = type_str[len(prefix):]
         return img_type
 
-    def save_pic(self, pic: PicObj, tag="", reply=""):
+    @staticmethod
+    def parse_pic(self, ctx: Union[GroupMsg, FriendMsg]) -> PicObj:
+        if ctx.MsgType != MsgTypes.PicMsg:
+            return None
+
+        content = ""
+        pic_obj = PicObj()
+        if isinstance(ctx, FriendMsg):
+            pics = friend.pic(ctx)
+            pic_obj.user = ctx.FromUin
+            pic_obj.Url = pics.FriendPic[0].Url
+            pic_obj.Md5 = pics.FriendPic[0].FileMd5
+            content = pics.Content
+        elif isinstance(ctx, GroupMsg):
+            pics = group.pic(ctx)
+            pic_obj.user = ctx.FromUserId
+            pic_obj.Url = pics.GroupPic[0].Url
+            pic_obj.Md5 = pics.GroupPic[0].FileMd5
+            content = pics.Content
+        if re.match("^_savepic.{1,}", content):
+            pic_obj.cmd, pic_obj.tag, pic_obj.reply = self.save_cmd_parse(content[8:])
+
+        return pic_obj
+
+    def save_pic(self, pic: PicObj):
         if pic.Url:
             try:
                 res = httpx.get(pic.Url)
@@ -589,8 +639,10 @@ class reply_server:
                     img.write(res.content)
                 self.cmd_info.sequences[CMD_TYPE.PIC] += 1
                 new_reply_id = self.cmd_info.sequences[CMD_TYPE.PIC]
-                self.db.add_reply(self.cmd_info.cmd_id, CMD_TYPE.PIC, new_reply_id, tag=tag, md5=pic.Md5, file_type=img_type, reply=reply, user_id=self.user_info.user_id)
+                self.db.add_reply(self.cmd_info.cmd_id, CMD_TYPE.PIC, new_reply_id, tag=pic.tag, md5=pic.Md5, file_type=img_type, reply=pic.reply, user_id=self.user_info.user_id)
                 self.db.set_cmd_seq(self.cmd_info.cmd_id, CMD_TYPE.PIC, new_reply_id)
+                self.reply_type = REPLY_TYPE.TEXT
+                self.reply = f"图片回复已存储，关键词【{self.cmd_info.cmd}】 tag【{pic.tag}】 回复【{pic.reply}】"
                 return True
             except Exception as e:
                 logger.warning('Failed to get picture from url:{},{}'.format(pic.Url, e))
@@ -613,10 +665,10 @@ class reply_server:
         reply = ""
         space_index = cmd.find(' ')
         if space_index > 0:
-            arg = cmd[space_index:]
+            arg = cmd[space_index + 1:]
             cmd = cmd[0:space_index]
         else:
-            return cmd, None, None
+            return cmd, arg, reply
 
         space_index = arg.find(' reply')
         if space_index >= 0:
@@ -716,7 +768,7 @@ class reply_server:
         logger.info('saving {}'.format(cmd))
         cmd, tag, reply = self.save_cmd_parse(cmd)
         if len(cmd) and reply and len(reply):
-            if self.checkout(cmd, user_qq, cmd_type=CMD_TYPE.TEXT_TAG, create=True):
+            if self.checkout(cmd, user_qq, cmd_type=CMD_TYPE.TEXT_TAG, create=True, private=1):
                 max_id = self.db.get_private_reply_max_id(self.user_info.user_id, self.cmd_info.cmd_id)
                 if max_id == 0:
                     max_id = 10001
@@ -729,13 +781,18 @@ class reply_server:
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "这个关键词好像用不了捏"
 
+    def save_private_pic_reply(self, pic_obj: PicObj):
+        return
+
     def random_private_text(self):
-        reply_info = self.db.get_private_reply(self.user_info.user_id, self.cmd_info.cmd_id)
-        if reply_info:
-            self.reply = reply_info.reply
+        replies = self.db.get_private_reply(self.user_info.user_id, self.cmd_info.cmd_id)
+        count = replies.count()
+        if count > 0:
+            ind = random.randint(1, count) - 1
+            self.reply = replies[ind].reply
             self.reply_type = REPLY_TYPE.TEXT
             self.db.used_inc(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
-                             CMD_TYPE.TEXT_TAG, reply_info.reply_id, private=True)
+                             CMD_TYPE.TEXT_TAG, replies[ind].reply_id, private=True)
 
 
 class plugin_manager:
