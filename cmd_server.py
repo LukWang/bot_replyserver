@@ -276,6 +276,8 @@ class reply_server:
             self.reply = "用户【{}】，权限已修改为【{}】".format(target_qq, permission)
 
     def rename_cmd(self, cmd, user_qq):
+        if not self.check_admin(user_qq):
+            return
         cmd, arg = self.get_next_arg(cmd)
         if self.checkout(cmd, user_qq, check_active=False):
             if not self.db.get_real_cmd(arg):  # check if to arg already exists
