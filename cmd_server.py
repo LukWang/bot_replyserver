@@ -138,15 +138,19 @@ class reply_server:
         cmds = self.db.get_all_cmd(CMD_TYPE.PLUGIN)
         p_mgr = plugin_manager()
         help_content = "本群已启用功能:\n"
-        content_off = "------------\n以下功能已禁用:\n"
+        content_off = "\n------------\n以下功能已禁用:\n"
+        off = False
         for cmd in cmds:
-            if p_mgr.checkout(group_qq_s=group_id, cmd_id=cmd.cmd_id):
-                help_content += cmd.cmd + "\n"
-            else:
-                help_content += cmd.cmd + "\n"
+            if cmd.active:
+                if p_mgr.checkout(group_qq_s=group_id, cmd_id=cmd.cmd_id):
+                    help_content += f"\u26aa {cmd.cmd}\n"
+                else:
+                    off = True
+                    content_off += f"\u2716 {cmd.cmd}\n"
 
-        help_content += "调教助手\n输入 【帮助+功能】 查看各功能详情"
-        help_content += content_off
+        help_content += "输入 【帮助+功能】 查看各功能详情"
+        if off:
+            help_content += content_off
         self.reply_type = REPLY_TYPE.TEXT
         self.reply = help_content
 
@@ -389,7 +393,7 @@ class reply_server:
             if target == jconfig.bot:
                 flag_at_me = True
         if "帮助" == ctx.Content:
-            self.help()
+            self.help(group_qq)
 
         if "_save" == ctx.Content[:5]:
             logger.info("Is save cmd")
@@ -633,7 +637,7 @@ class reply_server:
             p_cmd = cmd[space_index+1:]
             p_cmd = p_cmd.strip()
             cmd = cmd[0:space_index]
-            if self.checkout(cmd, super_user):
+            if self.checkout(cmd, super_user, check_active=False):
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "关键词【{}】已存在，不可以设置为同义词捏".format(cmd)
                 return
