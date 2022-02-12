@@ -600,7 +600,7 @@ class reply_server:
     def get_next_arg(cmd):
         space_index = cmd.find(' ')
         if space_index > 0:
-            return cmd[0:space_index], cmd[space_index:]
+            return cmd[0:space_index], cmd[space_index+1:]
         else:
             return cmd, None
 
