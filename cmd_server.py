@@ -309,6 +309,13 @@ class reply_server:
             self.reply_type = REPLY_TYPE.TEXT
             self.reply = "关键词【{}】不存在".format(cmd)
 
+    def list_private_cmd(self, user_qq):
+        output_text = ""
+        output_list = {}
+        self.user_info = get_user(user_qq)
+        if self.user_info:
+            cmd_ids = self.db.list_private_cmds(userInfo.user_id)
+
     def list_all_cmd(self, user_qq):
         output_text = ""
         output_list = {}
@@ -320,8 +327,6 @@ class reply_server:
             for cmd in cmds:
                 if cmd.active and cmd.level < self.user_info.permission and not cmd.private:
                     if cmd.orig_id == 0:
-                        if re.match("^_.*", cmd.cmd):
-                            continue
                         out_str = cmd.cmd
                         if self.user_info.permission > 50:
                             if CMD_TYPE.PIC & cmd.cmd_type and cmd.sequences[CMD_TYPE.PIC]:
@@ -361,9 +366,10 @@ class reply_server:
                     output_text += value + "\n"
 
             if len(output_text):
-                template = "当前已存储以下关键词:\n{}【调教方法】\n发送【_savepic关键词】开启图片存储会话\n发送【_savetxt关键词 reply回复】存储文字回复\n发送【_savealias子关键词 父关键词】建立同义词关联\n语音调教暂时不支持使用~\n例:\n_savepic色色\n_savetxt我想色色 reply不许色色！ (reply前有空格)\n_savealias我要色色 我想色色\n注意不要教我奇怪的东西哦~[表情109]"
-                self.reply = template.format(output_text)
-                self.reply_type = REPLY_TYPE.TEXT
+                template = "欢迎使用调教助手，你的可用关键词:\n{}【调教方法】\n发送【_savepic关键词 tag(可选) reply回复（可选）】开启图片存储会话\n发送【_savetxt关键词 tag(可选) reply回复】存储文字回复\n发送【_savealias子关键词 父关键词】建立同义词关联\n语音调教暂时不支持使用~\n例:\n_savepic色色\n_savetxt我想色色 reply不许色色！ (reply前有空格)\n_savealias我要色色 我想色色\n注意不要教我奇怪的东西哦~[PIC_FLAG]"
+                if self.checkout("FUFU", user_qq):
+                    self.random_pic("")
+                self.reply2 = template.format(output_text)
 
     def handle_save_cmd(self, cmd, user_qq):
         logger.info('saving {}'.format(cmd))
