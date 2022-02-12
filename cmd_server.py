@@ -388,6 +388,8 @@ class reply_server:
             target = ctx.target[0]
             if target == jconfig.bot:
                 flag_at_me = True
+        if "帮助" == ctx.Content:
+            self.help()
 
         if "_save" == ctx.Content[:5]:
             logger.info("Is save cmd")
