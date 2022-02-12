@@ -133,7 +133,23 @@ class reply_server:
 
     def __del__(self):
         print("server destroyed")
-    
+
+    def help(self, group_id: str):
+        cmds = self.db.get_all_cmd(CMD_TYPE.PLUGIN)
+        p_mgr = plugin_manager()
+        help_content = "本群已启用功能:\n"
+        content_off = "------------\n以下功能已禁用:\n"
+        for cmd in cmds:
+            if p_mgr.checkout(group_qq_s=group_id, cmd_id=cmd.cmd_id):
+                help_content += cmd.cmd + "\n"
+            else:
+                help_content += cmd.cmd + "\n"
+
+        help_content += "调教助手\n输入 【帮助+功能】 查看各功能详情"
+        help_content += content_off
+        self.reply_type = REPLY_TYPE.TEXT
+        self.reply = help_content
+
     def reply_super(self, reply: str):
         self.action.sendFriendText(int(super_user), reply)
 
@@ -695,22 +711,32 @@ class reply_server:
 
 
 class plugin_manager:
-    def __init__(self, name: str, cmd_id=0):
+    def __init__(self, name="", cmd_id=0):
         self.plugin_name = name.upper()
         self.cmd_id = cmd_id
         self.db = self.db = cmdDB()
 
-    def checkout(self, group_qq: int, create=True) -> bool:
-        group_info = get_group(str(group_qq))
+    def set_plugin_name(self, name):
+        self.plugin_name = name.upper()
+
+    def set_plugin_id(self, cmd_id):
+        self.cmd_id = cmd_id
+
+    def checkout(self, group_qq = 0, group_qq_s = "", cmd_id = 0, create=False) -> bool:
+        if group_qq:
+            group_qq_s = str(group_qq)
+        group_info = get_group(group_qq_s)
         if not group_info:
             return False
+        if cmd_id:
+            self.cmd_id = cmd_id
+        else:
+            cmd_info = self.db.get_real_cmd(self.plugin_name)
+            if not cmd_info:
+                if create:
+                    cmd_info = self.db.add_alias(self.plugin_name, 0, CMD_TYPE.PLUGIN, 0)
+            self.cmd_id = cmd_info.cmd_id
 
-        cmd_info = self.db.get_real_cmd(self.plugin_name)
-        if not cmd_info:
-            if create:
-                cmd_info = self.db.add_alias(self.plugin_name, 0, CMD_TYPE.PLUGIN, 0)
-
-        self.cmd_id = cmd_info.cmd_id
         ret = self.db.is_group_cmd_enabled(group_info.group_id, self.cmd_id)
         if ret:
             return True

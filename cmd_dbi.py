@@ -82,9 +82,20 @@ class cmdDB:
             self.db.execute('update cmd_alias set active = ? where cmd = ?', (active, cmd))
         self.conn.commit()
 
-    def get_all_cmd(self):
+    def get_all_cmd(self, cmd_type=0):
         cmds = []
-        self.db.execute("select id, p_cmd_id, cmd, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8 from cmd_alias where type < 1000 order by id")
+        param = None
+        sql = "select id, p_cmd_id, cmd, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8 from cmd_alias"
+        if cmd_type == 0:
+            sql += " where type < ?"
+            param = (CMD_TYPE.PLUGIN,)
+        else:
+            sql += " where type = ?"
+            param = (cmd_type, )
+
+        sql += "order by id"
+
+        self.db.execute(sql, param)
         rows = self.db.fetchall()
         if rows is not None:
             for row in rows:
