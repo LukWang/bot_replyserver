@@ -287,7 +287,9 @@ class reply_server:
             else:
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "关键词【{}】已存在，无法重命名".format(arg)
-
+        else:
+            self.reply_type = REPLY_TYPE.TEXT
+            self.reply = "关键词【{}】不存在".format(cmd)
     def list_all_cmd(self, user_qq):
         output_text = ""
         output_list = {}
