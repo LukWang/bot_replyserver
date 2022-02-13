@@ -12,6 +12,7 @@ import queue
 from typing import Union
 
 from .cmd_dbi import cmdDB, cmdInfo, replyInfo, CMD_TYPE, userInfo, groupInfo
+from .exceptions import *
 
 
 class PicObj:
@@ -21,6 +22,7 @@ class PicObj:
     cmd: str
     tag: str
     reply: str
+    private: bool
 
     def __init__(self):
         self.user = ""
@@ -34,12 +36,21 @@ class PicObj:
 cur_file_dir = os.path.dirname(os.path.realpath(__file__))
 pic_dir = ""
 super_user = ""
+user_record_level = 2
+# user_record_level:
+# 0: do not record
+# 1: cmd level record
+# 2: reply_level_record
+bot_primary_cmd = "FUFU"  # bot的主题图库, 用于在_listcmd时挑选显示的图片
+
 try:
     with open(cur_file_dir + '/config.json', 'r', encoding='utf-8') as f:
         config = json.load(f)
         pic_dir = config['pic_dir']
         voice_dir = config['voice_dir']
         super_user = config["super_user"]
+        if "user_record_level" in config:
+            user_record_level = super_user = config["user_record_level"]
 except:
     logger.error('config error')
     raise
@@ -59,6 +70,7 @@ class REPLY_TYPE:
 CMD_TYPE_LIST = [CMD_TYPE.PIC, CMD_TYPE.TEXT_TAG, CMD_TYPE.TEXT_FORMAT, CMD_TYPE.VOICE]
 
 
+# user id getter with cache
 def get_user(user_qq):
     user_info = None
     if user_qq in g_user_cache:
@@ -78,6 +90,7 @@ def get_user(user_qq):
     return user_info
 
 
+# group id getter with cache
 def get_group(group_qq: str):
     group_info = None
     if group_qq in g_group_cache:
@@ -97,6 +110,7 @@ def get_group(group_qq: str):
     return group_info
 
 
+# A random shuffler with weight
 class Selector:
     def __init__(self):
         self.candies = []
@@ -124,27 +138,24 @@ class Selector:
 
 class reply_server:
 
-    def __init__(self, is_session=False):
+    def __init__(self, async_server=True):
         self.db = cmdDB()
         self.cmd_info = cmdInfo()
-        self.cur_dir = ''
-        self.reply = ""
-        self.reply2 = ""
+        self.cur_dir = ""
+        self.reply = ""  # 存储文字回复/图片MD5/路径
+        self.reply2 = ""  # 存储图片附带回复
         self.reply_type = 0
         self.user_info = None
-        self.use_md5 = 1
-        self.group_flag = True
-        self.reply_at = 0
-        self.running = False
-        if is_session:
+        self.use_md5 = 1  # 图片回复使用MD5
+        self.group_flag = True  # 群聊上下文
+        self.reply_at = 0  # 回复时@的qq
+        self.running = False  # 异步模式下的状态
+        if not async_server:  # 不以异步模式运行时
             self.cmd_queue = None
             self.action = None
         else:
             self.cmd_queue = queue.Queue()
             self.action = Action(jconfig.bot, host=jconfig.host, port=jconfig.port)
-
-    def __del__(self):
-        print("server destroyed")
 
     def help(self, group_id: str):
         cmds = self.db.get_all_cmd(CMD_TYPE.PLUGIN)
@@ -204,37 +215,127 @@ class reply_server:
                 elif self.reply_type == REPLY_TYPE.VOICE:
                     self.action.sendGroupVoice(ctx.FromGroupId, voiceBase64Buf=file_to_base64(self.reply))
 
-    def checkout(self, cmd: str, user_qq: str, cmd_type=0, create=False, check_active=True, private=0):
+    def handle_cmd(self, ctx):
+        self.reply_at = 0
+        self.reply_type = 0
+        self.reply = ""
+        user_qq = ""
+        group_qq = ""
+
+        if isinstance(ctx, FriendMsg):
+            user_qq = str(ctx.FromUin)
+            self.group_flag = False
+        elif isinstance(ctx, GroupMsg):
+            user_qq = str(ctx.FromUserId)
+            group_qq = str(ctx.FromGroupId)
+            self.group_flag = True
+
+        if ctx.MsgType == MsgTypes.PicMsg:
+            pic_obj = self.parse_pic(ctx)
+            if len(pic_obj.cmd):
+                    return self.save_pic(pic_obj)
+
+        target = None
+        flag_at_me = False
+        if ctx.MsgType == "AtMsg":
+            target = ctx.target[0]
+            if target == jconfig.bot:
+                flag_at_me = True
+
+        if ctx.Content == "帮助":
+            self.help(group_qq)
+        elif ctx.Content == "_listcmd":
+            return self.list_all_cmd(user_qq)
+        elif ctx.Content == "_scanvoice":
+            return self.scan_voice_dir()
+        elif re.match("^_save.{1,}", ctx.Content):
+            return self.handle_save_cmd(ctx.Content[5:], user_qq)
+        elif re.match("^_set.{1,}", ctx.Content):
+            return self.handle_set_cmd(ctx.Content[4:], user_qq, target)
+        elif re.match("^_disable.{1,}", ctx.Content):
+            return self.set_cmd_active(ctx.Content[8:], 0, user_qq, group_qq)
+        elif re.match("^_enable.{1,}", ctx.Content):
+            return self.set_cmd_active(ctx.Content[7:], 1, user_qq, group_qq)
+        elif re.match("^_check.{1,}", ctx.Content):
+            return self.handle_check_cmd(ctx.Content[6:], user_qq)
+        elif re.match("^_rename.{1,}", ctx.Content):
+            return self.rename_cmd(ctx.Content[7:], user_qq)
+
+        arg = ""
+        checkout_good = False
+        content = ctx.Content.strip()
+        if len(content) > 1:
+            content = re.sub("[!?\uff1f\uff01]$", '', content)  # erase ! ? at end of content
+        pic_flag = False
+
+        space_index = content.find(' ')  # 附带参数的关键词
+        if space_index == -1:
+            checkout_good = self.checkout(content, user_qq)
+        else:
+            cmd = content[0:space_index]
+            checkout_good = self.checkout(cmd, user_qq)
+            arg = content[space_index:]
+            arg = arg.strip()
+        if not checkout_good:
+            return
+
+        if flag_at_me:
+            self.reply_at = int(user_qq)
+            return self.handle_private_cmd()
+
+        return self.random_reply(arg)
+
+    # check if cmd(keyword) exists, create one when not exists if "create" is specified
+    def checkout(self, cmd: str, user_qq: str, cmd_type=0, create=False, check_active=True, private=False):
         self.user_info = get_user(user_qq)
         if not self.user_info:
             return False
 
-        cmd = cmd.upper()  # cmd is case insensitive
-        self.cmd_info = self.db.get_real_cmd(cmd)  # handle alias
+        cmd = cmd.upper()  # cmd is case-insensitive
+        if private:
+            self.cmd_info = self.db.get_cmd(cmd, real=True)  # alias is handled inside
+        else:
+            self.cmd_info = self.db.get_private_cmd(cmd, real=True)
 
         if self.cmd_info:
-            print(f"content:{self.cmd_info.cmd}")
-            self.cur_dir = os.path.join(pic_dir, self.cmd_info.cmd)
-        else:
-            self.cur_dir = os.path.join(pic_dir, cmd)
+            if private:
+                self.cur_dir = os.path.join(pic_dir, f"_{user_qq}", self.cmd_info.cmd)
+            else:
+                self.cur_dir = os.path.join(pic_dir, self.cmd_info.cmd)
+        elif create:
+            if private:
+                self.cur_dir = os.path.join(pic_dir, f"_{user_qq}", cmd)
+            else:
+                self.cur_dir = os.path.join(pic_dir, cmd)
 
         if not self.cmd_info:
             if create:
                 if not os.path.exists(self.cur_dir) and (cmd_type & CMD_TYPE.PIC):
                     os.mkdir(self.cur_dir)
-                self.cmd_info = self.db.add_alias(cmd, 0, cmd_type, 0, private)
-            else:
-                return False
+                self.cmd_info = self.add_alias(cmd, 0, cmd_type, 0, self.user_info.user_id)
+
+        if create and cmd_type & self.cmd_info.cmd_type == 0:
+            self.db.set_cmd_type(self.cmd_info.cmd_id, cmd_type | self.cmd_info.cmd_type)
+
+        if not self.cmd_info:
+            return False
 
         # Availability check
         if (check_active and self.cmd_info.active == 0) or self.user_info.permission < self.cmd_info.level:
             return False
 
-        # if cmd is private before, make it public
-        if create and private == 0 and self.cmd_info.private == 1:
-            self.db.set_cmd_private(self.cmd_info.cmd_id, 0)
-
         return True
+
+    def add_alias(self, cmd, parent, reply_type, level, user_id=0):
+        # 这里不会检查alias是否已经存在, 请在调用处检查
+        if user_id == 0:  # Public cmd alias
+            return self.db.add_alias(cmd, parent, reply_type, level)
+        else:
+            max_id = self.db.get_private_cmd_max_id(user_id)
+            if max_id >= self.user_info.private_limit: # assume the user_info has been retrieved here
+                raise CmdLimitExceedException
+            else:
+                return self.db.add_private_alias(user_id, max_id+1, cmd, parent)
 
     def set_cmd_type(self, cmd, arg):
         if arg is None:
@@ -298,7 +399,7 @@ class reply_server:
             return
         cmd, arg = self.get_next_arg(cmd)
         if self.checkout(cmd, user_qq, check_active=False):
-            if not self.db.get_real_cmd(arg):  # check if to arg already exists
+            if not self.db.get_cmd(arg):  # check if to arg already exists
                 self.db.rename_cmd(self.cmd_info.cmd_id, arg)
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "重命名关键词【{}】->关键词【{}】".format(cmd, arg)
@@ -309,13 +410,6 @@ class reply_server:
             self.reply_type = REPLY_TYPE.TEXT
             self.reply = "关键词【{}】不存在".format(cmd)
 
-    def list_private_cmd(self, user_qq):
-        output_text = ""
-        output_list = {}
-        self.user_info = get_user(user_qq)
-        if self.user_info:
-            cmd_ids = self.db.list_private_cmds(userInfo.user_id)
-
     def list_all_cmd(self, user_qq):
         output_text = ""
         output_list = {}
@@ -325,22 +419,21 @@ class reply_server:
             if cmds is None:
                 return
             for cmd in cmds:
-                if cmd.active and cmd.level < self.user_info.permission and not cmd.private:
+                if cmd.active and cmd.level < self.user_info.permission:
                     if cmd.orig_id == 0:
                         out_str = cmd.cmd
-                        if self.user_info.permission > 50:
+                        if self.user_info.permission > 50:  # 权限大于一定值显示每项关键词的回复数量
                             if CMD_TYPE.PIC & cmd.cmd_type and cmd.sequences[CMD_TYPE.PIC]:
                                 out_str += " 图片回复{}项".format(cmd.sequences[CMD_TYPE.PIC])
                             if CMD_TYPE.TEXT_TAG & cmd.cmd_type and cmd.sequences[CMD_TYPE.TEXT_TAG]:
                                 out_str += " 文字回复A类{}项".format(cmd.sequences[CMD_TYPE.TEXT_TAG])
                             if CMD_TYPE.TEXT_FORMAT & cmd.cmd_type and cmd.sequences[CMD_TYPE.TEXT_FORMAT]:
-                                continue
-                                #out_str += " 文字回复B类{}项".format(cmd.sequences[CMD_TYPE.TEXT_FORMAT])
+                                out_str += " 文字回复B类{}项".format(cmd.sequences[CMD_TYPE.TEXT_FORMAT])
                             if CMD_TYPE.VOICE & cmd.cmd_type and cmd.sequences[CMD_TYPE.VOICE]:
                                 out_str += " 语音回复{}项".format(cmd.sequences[CMD_TYPE.VOICE])
 
                         output_list[cmd.cmd_id] = out_str
-                    else:
+                    else:  # 处理同义词
                         parent_id = 0
                         if cmd.orig_id in output_list:
                             parent_id = cmd.orig_id
@@ -367,7 +460,7 @@ class reply_server:
 
             if len(output_text):
                 template = "欢迎使用调教助手，你的可用关键词:\n{}【调教方法】\n发送【_savepic关键词 tag(可选) reply回复（可选）】开启图片存储会话\n发送【_savetxt关键词 tag(可选) reply回复】存储文字回复\n发送【_savealias子关键词 父关键词】建立同义词关联\n语音调教暂时不支持使用~\n例:\n_savepic色色\n_savetxt我想色色 reply不许色色！ (reply前有空格)\n_savealias我要色色 我想色色\n注意不要教我奇怪的东西哦~[PIC_FLAG]"
-                if self.checkout("FUFU", user_qq):
+                if self.checkout(bot_primary_cmd, user_qq):
                     self.random_pic("")
                 self.reply2 = template.format(output_text)
 
@@ -417,85 +510,6 @@ class reply_server:
         self.reply = "你的权限为:【{}】".format(self.user_info.permission)
         self.reply_at = int(user_qq)
 
-    def handle_cmd(self, ctx):
-        self.reply_at = 0
-        self.reply_type = 0
-        self.reply = ""
-        user_qq = ""
-        group_qq = ""
-
-
-        if isinstance(ctx, FriendMsg):
-            user_qq = str(ctx.FromUin)
-            self.group_flag = False
-        elif isinstance(ctx, GroupMsg):
-            user_qq = str(ctx.FromUserId)
-            group_qq = str(ctx.FromGroupId)
-            self.group_flag = True
-
-        if ctx.MsgType == MsgTypes.PicMsg:
-            pic_obj = self.parse_pic(ctx)
-            if len(pic_obj.cmd):
-                if self.checkout(pic_obj.cmd, user_qq, cmd_type=CMD_TYPE.PIC, create=True):
-                    return self.save_pic(pic_obj)
-
-        target = None
-        flag_at_me = False
-        if ctx.MsgType == "AtMsg":
-            target = ctx.target[0]
-            if target == jconfig.bot:
-                flag_at_me = True
-
-        if "帮助" == ctx.Content:
-            self.help(group_qq)
-
-        if re.match("^_save.{1,}", ctx.Content):
-            return self.handle_save_cmd(ctx.Content[5:], user_qq)
-        elif re.match("^_set.{1,}", ctx.Content):
-            return self.handle_set_cmd(ctx.Content[4:], user_qq, target)
-        elif ctx.Content == "_listcmd":
-            return self.list_all_cmd(user_qq)
-        elif re.match("^_disable.{1,}", ctx.Content):
-            return self.set_cmd_active(ctx.Content[8:], 0, user_qq, group_qq)
-        elif re.match("^_enable.{1,}", ctx.Content):
-            return self.set_cmd_active(ctx.Content[7:], 1, user_qq, group_qq)
-        elif re.match("^_check.{1,}", ctx.Content):
-            return self.handle_check_cmd(ctx.Content[6:], user_qq)
-        elif ctx.Content == "_scanvoice":
-            return self.scan_voice_dir()
-        elif re.match("^_rename.{1,}", ctx.Content):
-            return self.rename_cmd(ctx.Content[7:], user_qq)
-
-        arg = ""
-        checkout_good = False
-        content = ctx.Content.strip()
-        if len(content) > 1:
-            content = re.sub("[!?\uff1f\uff01]$", '', content)  # erase ! ? at end of content
-        pic_flag = False
-        if re.match("^来张.{1,}", content):
-            content = content[len("来张"):]
-            pic_flag = True
-
-        space_index = content.find(' ')
-        if space_index == -1:
-            checkout_good = self.checkout(content, user_qq)
-        else:
-            cmd = content[0:space_index]
-            checkout_good = self.checkout(cmd, user_qq)
-            arg = content[space_index:]
-            arg = arg.strip()
-        if not checkout_good:
-            return
-
-        if flag_at_me:
-            self.reply_at=int(user_qq)
-            return self.random_private_text()
-
-        if pic_flag:
-            self.cmd_info.cmd_type = CMD_TYPE.PIC
-
-        return self.random_reply(arg)
-
     def random_reply(self, arg):
         reply_info = None
         if len(arg):
@@ -536,8 +550,8 @@ class reply_server:
         if reply_info:
             self.reply = reply_info.reply
             self.reply_type = REPLY_TYPE.TEXT
-            self.db.used_inc(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
-                             CMD_TYPE.TEXT_TAG, reply_info.reply_id)
+            self.usage_increase(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
+                                CMD_TYPE.TEXT_TAG, reply_info.reply_id)
         elif user_id:
             self.reply = "你好像没有设置私人回复捏"
             self.reply_type = REPLY_TYPE.TEXT
@@ -552,7 +566,7 @@ class reply_server:
         if reply_info:
             self.reply = reply_info.reply.format(arg)
             self.reply_type = REPLY_TYPE.TEXT
-            self.db.used_inc(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
+            self.usage_increase(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
                              CMD_TYPE.TEXT_FORMAT, reply_info.reply_id)
 
     def _random_pic(self, tag) -> replyInfo:
@@ -567,7 +581,7 @@ class reply_server:
             reply_id = random.randint(1, self.cmd_info.sequences[CMD_TYPE.PIC])
             reply_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.PIC, reply_id)
         if reply_info:
-            self.db.used_inc(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
+            self.usage_increase(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
                              CMD_TYPE.PIC, reply_info.reply_id)
 
         return reply_info
@@ -604,8 +618,8 @@ class reply_server:
             voice_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.VOICE, reply_id)
 
         if voice_info:
-            self.db.used_inc(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
-                             CMD_TYPE.VOICE, voice_info.reply_id)
+            self.usage_increase(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
+                                CMD_TYPE.VOICE, voice_info.reply_id)
             self.reply_type = REPLY_TYPE.VOICE
             self.reply = os.path.join(voice_dir, "{}/{}.{}".format(self.cmd_info.cmd, voice_info.tag, voice_info.file_type))
 
@@ -618,7 +632,7 @@ class reply_server:
             img_type = type_str[len(prefix):]
         return img_type
 
-    def parse_pic(self, ctx: Union[GroupMsg, FriendMsg]) -> PicObj:
+    def parse_pic(self, ctx: Union[GroupMsg, FriendMsg]):
         if ctx.MsgType != MsgTypes.PicMsg:
             return None
 
@@ -626,23 +640,27 @@ class reply_server:
         pic_obj = PicObj()
         if isinstance(ctx, FriendMsg):
             pics = friend.pic(ctx)
-            pic_obj.user = ctx.FromUin
+            pic_obj.user = str(ctx.FromUin)
             pic_obj.Url = pics.FriendPic[0].Url
             pic_obj.Md5 = pics.FriendPic[0].FileMd5
             content = pics.Content
         elif isinstance(ctx, GroupMsg):
             pics = group.pic(ctx)
-            pic_obj.user = ctx.FromUserId
+            pic_obj.user = str(ctx.FromUserId)
             pic_obj.Url = pics.GroupPic[0].Url
             pic_obj.Md5 = pics.GroupPic[0].FileMd5
             content = pics.Content
         if re.match("^_savepic.{1,}", content):
             pic_obj.cmd, pic_obj.tag, pic_obj.reply = self.save_cmd_parse(content[8:])
+            pic_obj.private = False
+        elif re.match("^_saveppic.{1,}", content):
+            pic_obj.cmd, pic_obj.tag, pic_obj.reply = self.save_cmd_parse(content[9:])
+            pic_obj.private = True
 
         return pic_obj
 
     def save_pic(self, pic: PicObj):
-        if pic.Url:
+        if pic.Url and self.checkout(pic.cmd, pic.user, cmd_type=CMD_TYPE.PIC, create=True, private=pic.private):
             try:
                 res = httpx.get(pic.Url)
                 res.raise_for_status()
@@ -655,13 +673,23 @@ class reply_server:
                 logger.warning('Saving image to: {}'.format(file_path))
                 with open(file_path, 'wb') as img:
                     img.write(res.content)
-                self.cmd_info.sequences[CMD_TYPE.PIC] += 1
-                new_reply_id = self.cmd_info.sequences[CMD_TYPE.PIC]
-                self.db.add_reply(self.cmd_info.cmd_id, CMD_TYPE.PIC, new_reply_id, tag=pic.tag, md5=pic.Md5, file_type=img_type, reply=pic.reply, user_id=self.user_info.user_id)
-                self.db.set_cmd_seq(self.cmd_info.cmd_id, CMD_TYPE.PIC, new_reply_id)
-                self.reply_type = REPLY_TYPE.TEXT
-                self.reply = f"图片回复已存储，关键词【{self.cmd_info.cmd}】 tag【{pic.tag}】 回复【{pic.reply}】"
+                if pic.private:
+                    max_id = self.db.get_private_reply_max_id(self.user_info.user_id, self.cmd_info.cmd_id)
+                    if max_id < self.user_info.private_limit:
+                        raise ReplyLimitExceedException
+                    max_id += 1
+                    self.db.add_private_reply(self.cmd_info.cmd_id, CMD_TYPE.PIC, max_id, self.user_info.user_id, pic.Md5, img_type, pic.reply)
+                    self.reply_type = REPLY_TYPE.TEXT
+                    self.reply = f"私聊图片回复已存储，关键词【{self.cmd_info.cmd}】 回复【{pic.reply}】"
+                else:
+                    self.cmd_info.sequences[CMD_TYPE.PIC] += 1
+                    new_reply_id = self.cmd_info.sequences[CMD_TYPE.PIC]
+                    self.db.add_reply(self.cmd_info.cmd_id, CMD_TYPE.PIC, new_reply_id, tag=pic.tag, md5=pic.Md5, file_type=img_type, reply=pic.reply, user_id=self.user_info.user_id)
+                    self.db.set_cmd_seq(self.cmd_info.cmd_id, CMD_TYPE.PIC, new_reply_id)
+                    self.reply_type = REPLY_TYPE.TEXT
+                    self.reply = f"图片回复已存储，关键词【{self.cmd_info.cmd}】 tag【{pic.tag}】 回复【{pic.reply}】"
                 return True
+
             except Exception as e:
                 logger.warning('Failed to get picture from url:{},{}'.format(pic.Url, e))
                 raise
@@ -739,7 +767,7 @@ class reply_server:
                 self.reply = "关键词【{}】已存在，不可以设置为同义词捏".format(cmd)
                 return
             if self.checkout(p_cmd, super_user):
-                self.db.add_alias(cmd, self.cmd_info.cmd_id, 0, 0)
+                self.add_alias(cmd, self.cmd_info.cmd_id, 0, 0)
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "同义词设置成功:{} = {}".format(cmd, p_cmd)
 
@@ -780,9 +808,6 @@ class reply_server:
                 if not self.checkout(cmd, super_user, cmd_type=CMD_TYPE.VOICE, create=True):
                     self.reply = "命令索引创建/查找失败"
                     return
-                if self.cmd_info.cmd_type & CMD_TYPE.VOICE == 0:
-                    new_type = self.cmd_info.cmd_type | CMD_TYPE.VOICE
-                    self.set_cmd_type(cmd, str(new_type))
                 reports += self.scan_voice_sub_dir(cmd, sub_dir)
 
         self.reply = reports
@@ -791,12 +816,11 @@ class reply_server:
         logger.info('saving {}'.format(cmd))
         cmd, tag, reply = self.save_cmd_parse(cmd)
         if len(cmd) and reply and len(reply):
-            if self.checkout(cmd, user_qq, cmd_type=CMD_TYPE.TEXT_TAG, create=True, private=1):
+            if self.checkout(cmd, user_qq, cmd_type=CMD_TYPE.TEXT_TAG, create=True, private=True):
                 max_id = self.db.get_private_reply_max_id(self.user_info.user_id, self.cmd_info.cmd_id)
-                if max_id == 0:
-                    max_id = 10001
-                else:
-                    max_id += 1
+                if max_id < self.user_info.private_limit:
+                    raise ReplyLimitExceedException
+                max_id += 1
                 self.db.add_private_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, max_id, user_id=self.user_info.user_id, reply=reply)
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "私人回复存储成功，{}({}):{}".format(cmd, tag, reply)
@@ -804,21 +828,38 @@ class reply_server:
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "这个关键词好像用不了捏"
 
-    def save_private_pic_reply(self, pic_obj: PicObj):
-        return
+    def handle_private_cmd(self):
+        reply_info = self.random_private_reply()
+        if reply_info.type == CMD_TYPE.PIC:
+            self.reply_type = REPLY_TYPE.PIC_MD5
+            self.reply = reply_info.md5
+            self.reply2 = reply_info.reply
+        elif reply_info.type == CMD_TYPE.TEXT:
+            self.reply_type = REPLY_TYPE.TEXT
+            self.reply = reply_info.reply
 
-    def random_private_text(self):
+    def random_private_reply(self) -> replyInfo:
+        reply_info = None
         replies = self.db.get_private_reply(self.user_info.user_id, self.cmd_info.cmd_id)
         count = len(replies)
         if count > 0:
-            print(f"count{count}")
             ind = random.randint(1, count) - 1
-            self.reply = replies[ind].reply
-            self.reply_type = REPLY_TYPE.TEXT
-            self.db.used_inc(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
-                             CMD_TYPE.TEXT_TAG, replies[ind].reply_id, private=True)
+            reply_info = replies[ind].reply
+            self.usage_increase(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
+                                replies[ind].type, replies[ind].reply_id, private=True)
+        return reply_info
+
+    def usage_increase(self, user_id, orig_id, cmd_id, cmd_type, reply_id, private=False):
+        if user_record_level == 0:  # do not save record
+            return
+        elif user_record_level == 1:  # save cmd level record
+            cmd_type = 0
+            reply_id = 0
+        self.db.used_inc(user_id, orig_id, cmd_id,
+                         cmd_type, reply_id, private=private)
 
 
+# 将 plugin 作为特殊cmd使用 type=1000
 class plugin_manager:
     def __init__(self, name="", cmd_id=0):
         self.plugin_name = name.upper()
@@ -831,16 +872,16 @@ class plugin_manager:
     def set_plugin_id(self, cmd_id):
         self.cmd_id = cmd_id
 
-    def checkout(self, group_qq = 0, group_qq_s = "", cmd_id = 0, create=False) -> bool:
+    def checkout(self, group_qq=0, group_qq_s="", cmd_id=0, create=False) -> bool:
         if group_qq:
             group_qq_s = str(group_qq)
         group_info = get_group(group_qq_s)
         if not group_info:
             return False
-        if cmd_id:
+        if cmd_id:  # if cmd_id is given, no need to retrieve id from db
             self.cmd_id = cmd_id
         else:
-            cmd_info = self.db.get_real_cmd(self.plugin_name)
+            cmd_info = self.db.get_cmd(self.plugin_name)
             if not cmd_info:
                 if create:
                     cmd_info = self.db.add_alias(self.plugin_name, 0, CMD_TYPE.PLUGIN, 0)
@@ -860,10 +901,12 @@ class plugin_manager:
             return False
         return self.checkout(ctx.FromGroupId, create=True)
 
-    def app_usage(self, user_qq):
+    def app_usage(self, user_qq):  # increase plugin usage record
+        if user_record_level == 0:  # do not save record
+            return
         user_info = get_user(user_qq)
         if user_info:
-            self.db.used_inc(user_info.user_id, self.cmd_id, self.cmd_id, 1000, 1)
+            self.db.used_inc(user_info.user_id, self.cmd_id, self.cmd_id, CMD_TYPE.PLUGIN, 0)
 
 
 

@@ -22,6 +22,7 @@ class CMD_TYPE:
 
 
 class cmdInfo:
+    user_id: int
     cmd_id: int
     orig_id: int
     cmd: str
@@ -29,7 +30,6 @@ class cmdInfo:
     cmd_type: int  # a bit map indicating supported reply type
     level: int  # permission level, default 1
     sequences: dict
-    private: int
 
 
 class replyInfo:
@@ -52,6 +52,7 @@ class aliasInfo:
 class userInfo:
     user_id: int
     permission: int
+    private_limit: int
     qq: str
 
 
@@ -67,9 +68,9 @@ class cmdDB:
         self.db = self.conn.cursor()
 
     # alias operations
-    def add_alias(self, new_cmd, parent, reply_type, level, private):
-        self.db.execute("insert into cmd_alias(cmd, p_cmd_id, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8, private) "
-                                       "values(?,   ?,        1,      ?,    ?,     0, 0, 0, 0, ?)", (new_cmd, parent, reply_type, level, private))
+    def add_alias(self, new_cmd, parent, reply_type, level):
+        self.db.execute("insert into cmd_alias(cmd, p_cmd_id, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8) "
+                                       "values(?,   ?,        1,      ?,    ?,     0, 0, 0, 0)", (new_cmd, parent, reply_type, level))
         self.conn.commit()
         return self.get_real_cmd(new_cmd)
 
@@ -86,7 +87,7 @@ class cmdDB:
     def get_all_cmd(self, cmd_type=0):
         cmds = []
         param = None
-        sql = "select id, p_cmd_id, cmd, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8, private from cmd_alias"
+        sql = "select id, p_cmd_id, cmd, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8 from cmd_alias"
         if cmd_type == 0:
             sql += " where type < ?"
             param = (CMD_TYPE.PLUGIN,)
@@ -101,6 +102,7 @@ class cmdDB:
         if rows is not None:
             for row in rows:
                 cmd_info = cmdInfo()
+                cmd_info.user_id = 0
                 cmd_info.cmd_id = row[0]
                 cmd_info.orig_id = row[1]
                 cmd_info.cmd = row[2]
@@ -109,7 +111,6 @@ class cmdDB:
                 cmd_info.level = row[5]
                 cmd_info.sequences = {CMD_TYPE.PIC: row[6], CMD_TYPE.TEXT_TAG: row[7], CMD_TYPE.TEXT_FORMAT: row[8],
                                       CMD_TYPE.VOICE: row[9]}
-                cmd_info.private = row[10]
                 cmds.append(cmd_info)
 
         return cmds
@@ -130,22 +131,19 @@ class cmdDB:
         self.db.execute('update cmd_alias set cmd = ? where id = ?', (new_name, cmd_id))
         self.conn.commit()
 
-    def set_cmd_private(self, cmd_id, private):
-        self.db.execute('update cmd_alias set private = ? where id = ?', (private, cmd_id))
-        self.conn.commit()
-
-    def get_real_cmd(self, cmd):
+    def get_cmd(self, cmd, real=True):
         orig_cmd_id = 0
         cmd_info = None
-        self.db.execute("select id, p_cmd_id, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8, cmd, private from cmd_alias where cmd = ?", (cmd,))
+        self.db.execute("select id, p_cmd_id, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8, cmd from cmd_alias where cmd = ?", (cmd,))
         row = self.db.fetchone()
         if row:
             orig_cmd_id = row[0]
-        while row and row[1] > 0 and row[2] != 0:
-            self.db.execute("select id, p_cmd_id, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8, cmd, private from cmd_alias where id = ?", (row[1],))
+        while row and row[1] > 0 and row[2] != 0 and real:
+            self.db.execute("select id, p_cmd_id, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8, cmd from cmd_alias where id = ?", (row[1],))
             row = self.db.fetchone()
         if row:
             cmd_info = cmdInfo()
+            cmd_info.user_id = 0
             cmd_info.cmd_id = row[0]
             cmd_info.orig_id = orig_cmd_id
             cmd_info.cmd = row[9]
@@ -154,7 +152,6 @@ class cmdDB:
             cmd_info.level = row[4]
             cmd_info.sequences = {CMD_TYPE.PIC: row[5], CMD_TYPE.TEXT_TAG: row[6], CMD_TYPE.TEXT_FORMAT: row[7],
                                   CMD_TYPE.VOICE: row[8]}
-            cmd_info.private = row[10]
         return cmd_info
 
     # reply operation
@@ -237,8 +234,9 @@ class cmdDB:
         if row:
             user_info = userInfo()
             user_info.user_id = row[0]
-            userInfo.permission = row[1]
-            userInfo.qq = user_qq
+            user_info.permission = row[1]
+            user_info.private_limit = 10
+            user_info.qq = user_qq
 
         return user_info
 
@@ -249,18 +247,18 @@ class cmdDB:
     def used_inc(self, user_id, orig_id, cmd_id, reply_type, reply_id, private=False):
         reply_table = ""
         if private:
-            reply_table = "p_replies"
+            self.db.execute('update p_replies set time_used = time_used + 1 where user_id = ? cmd_id = ? type = ? and id = ?', (user_id, cmd_id, reply_type, reply_id))
         else:
-            reply_table = "replies"
-        self.db.execute('update {} set time_used = time_used + 1 where cmd_id = ? and type = ? and id = ?'.format(reply_table), (cmd_id, reply_type, reply_id))
-        try:
-            self.db.execute("insert into user_records(user_id, orig_cmd_id, cmd_id, type, reply_id, time_used, first_used, last_used) "
-                                              "values(?,       ?,           ?,      ?,    ?,        1,          DATE('now'),DATE('now'))",
-                                                     (user_id, orig_id, cmd_id, reply_type, reply_id))
-        except sqlite3.DatabaseError:
-            self.db.execute("update user_records set time_used = time_used + 1, last_used = DATE('now') "
-                            "where user_id = ? and orig_cmd_id = ? and cmd_id = ? and type = ? and reply_id = ?",
-                            (user_id, orig_id, cmd_id, reply_type, reply_id))
+            self.db.execute('update replies set time_used = time_used + 1 where cmd_id = ? and type = ? and id = ?', (cmd_id, reply_type, reply_id))
+        if not private:
+            try:
+                self.db.execute("insert into user_records(user_id, orig_cmd_id, cmd_id, type, reply_id, time_used, first_used, last_used) "
+                                                  "values(?,       ?,           ?,      ?,    ?,        1,          DATE('now'),DATE('now'))",
+                                                         (user_id, orig_id, cmd_id, reply_type, reply_id))
+            except sqlite3.DatabaseError:
+                self.db.execute("update user_records set time_used = time_used + 1, last_used = DATE('now') "
+                                "where user_id = ? and orig_cmd_id = ? and cmd_id = ? and type = ? and reply_id = ?",
+                                (user_id, orig_id, cmd_id, reply_type, reply_id))
 
         self.conn.commit()
 
@@ -290,13 +288,67 @@ class cmdDB:
             replies.append(reply_info)
         return replies
 
-    def list_private_cmds(self, user_id) -> list:
-        cmd_ids = []
-        self.db.execute('select distinct cmd_id from p_replies where user_id = ?', (user_id, ))
+    def add_private_alias(self, user_id, cmd_id, new_cmd, parent):
+        self.db.execute("insert into p_cmd_alias(user_id, cmd_id, cmd, p_cmd_id, active) "
+                                       "values(?,       ?,      ?,   ?,        ?)", (user_id, cmd_id, new_cmd, parent, 1))
+        self.conn.commit()
+        return self.get_private_cmd(user_id, new_cmd)
+
+    def set_private_cmd_active(self, user_id, cmd, cmd_id, active):
+        if cmd_id:
+            self.db.execute('update p_cmd_alias set active = ? where user_id = ? and cmd_id = ?', (user_id, active, cmd_id))
+        else:
+            self.db.execute('update p_cmd_alias set active = ? where user_id = ? and cmd = ?', (user_id, active, cmd))
+        self.conn.commit()
+
+    def rename_private_cmd(self, user_id, cmd_id, new_name):
+        self.db.execute('update p_cmd_alias set user_id = ? and cmd = ? where cmd_id = ?', (user_id, new_name, cmd_id))
+        self.conn.commit()
+
+    def get_private_cmd_max_id(self, user_id):
+        self.db.execute('select ifnull(max(cmd_id), 0) from p_cmd_alias where user_id = ?', (user_id,))
+        return self.db.fetchone()[0]
+
+    def get_private_cmd(self, user_id, cmd, real=True):
+        orig_cmd_id = 0
+        cmd_info = None
+        self.db.execute("select cmd_id, cmd, p_cmd_id, active from p_cmd_alias where user_id = ? and cmd = ?", (user_id, cmd))
+        row = self.db.fetchone()
+        if row:
+            orig_cmd_id = row[0]
+        while row and row[1] > 0 and row[2] != 0 and real:
+            self.db.execute("select cmd_id, cmd, p_cmd_id, active from p_cmd_alias where user_id = ? and id = ?", (user_id, row[1],))
+            row = self.db.fetchone()
+        if row:
+            cmd_info = cmdInfo()
+            cmd_info.user_id = user_id
+            cmd_info.cmd_id = row[0]
+            cmd_info.orig_id = orig_cmd_id
+            cmd_info.cmd = row[1]
+            cmd_info.active = row[3]
+            cmd_info.cmd_type = 3  # PIC | TEXT
+            cmd_info.level = 1
+            cmd_info.sequences = {}
+        return cmd_info
+
+    def get_all_private_cmd(self, user_id):
+        cmds = []
+        self.db.execute("select id, p_cmd_id, cmd, active from p_cmd_alias where user_id = ? order by id", (user_id, ))
         rows = self.db.fetchall()
-        for row in rows:
-            cmd_ids.append(row[0])
-        return cmd_ids
+        if rows is not None:
+            for row in rows:
+                cmd_info = cmdInfo()
+                cmd_info.user_id = user_id
+                cmd_info.cmd_id = row[0]
+                cmd_info.orig_id = row[1]
+                cmd_info.cmd = row[2]
+                cmd_info.active = row[3]
+                cmd_info.cmd_type = 3  # PIC | TEXT
+                cmd_info.level = 1
+                cmd_info.sequences = {}
+                cmds.append(cmd_info)
+
+        return cmds
 
     def add_group(self, group_qq):
         self.db.execute(
