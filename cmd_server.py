@@ -366,7 +366,7 @@ class reply_server:
                     output_text += value + "\n"
 
             if len(output_text):
-                template = "欢迎使用调教助手，你的可用关键词:\n{}【调教方法】\n发送【_savepic关键词 tag(可选) reply回复（可选）】开启图片存储会话\n发送【_savetxt关键词 tag(可选) reply回复】存储文字回复\n发送【_savealias子关键词 父关键词】建立同义词关联\n语音调教暂时不支持使用~\n例:\n_savepic色色\n_savetxt我想色色 reply不许色色！ (reply前有空格)\n_savealias我要色色 我想色色\n注意不要教我奇怪的东西哦~[PIC_FLAG]"
+                template = "欢迎使用调教助手，你的可用关键词:\n{}【调教方法】\n发送【_savepic关键词 tag(可选) reply回复（可选）】开启图片存储会话\n发送【_savetxt关键词 tag(可选) reply回复】存储文字回复\n发送【_savealias子关键词 父关键词】建立同义词关联\n语音调教暂时不支持使用~\n例:\n_savepic色色\n_savetxt我想色色 reply不许色色！ (reply前有空格)\n_savealias我要色色 我想色色\n注意不要教我奇怪的东西哦~[PICFLAG]"
                 if self.checkout("FUFU", user_qq):
                     self.random_pic("")
                 self.reply2 = template.format(output_text)
@@ -739,7 +739,7 @@ class reply_server:
                 self.reply = "关键词【{}】已存在，不可以设置为同义词捏".format(cmd)
                 return
             if self.checkout(p_cmd, super_user):
-                self.db.add_alias(cmd, self.cmd_info.cmd_id, 0, 0)
+                self.db.add_alias(cmd, self.cmd_info.cmd_id, 0, 0, private=0)
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "同义词设置成功:{} = {}".format(cmd, p_cmd)
 
