@@ -247,7 +247,7 @@ class cmdDB:
     def used_inc(self, user_id, orig_id, cmd_id, reply_type, reply_id, private=False):
         reply_table = ""
         if private:
-            self.db.execute('update p_replies set time_used = time_used + 1 where user_id = ? cmd_id = ? type = ? and id = ?', (user_id, cmd_id, reply_type, reply_id))
+            self.db.execute('update p_replies set time_used = time_used + 1 where user_id = ? and cmd_id = ? and type = ? and id = ?', (user_id, cmd_id, reply_type, reply_id))
         else:
             self.db.execute('update replies set time_used = time_used + 1 where cmd_id = ? and type = ? and id = ?', (cmd_id, reply_type, reply_id))
         if not private:
@@ -316,8 +316,8 @@ class cmdDB:
         row = self.db.fetchone()
         if row:
             orig_cmd_id = row[0]
-        while row and row[1] > 0 and row[2] != 0 and real:
-            self.db.execute("select cmd_id, cmd, p_cmd_id, active from p_cmd_alias where user_id = ? and id = ?", (user_id, row[1],))
+        while row and row[2] > 0 and row[3] != 0 and real:
+            self.db.execute("select cmd_id, cmd, p_cmd_id, active from p_cmd_alias where user_id = ? and id = ?", (user_id, row[2],))
             row = self.db.fetchone()
         if row:
             cmd_info = cmdInfo()

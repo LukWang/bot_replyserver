@@ -270,7 +270,7 @@ class reply_server:
 
         space_index = content.find(' ')  # 附带参数的关键词
         if space_index == -1:
-            checkout_good = self.checkout(content, user_qq)
+            checkout_good = self.checkout(content, user_qq, private=flag_at_me)
         else:
             cmd = content[0:space_index]
             checkout_good = self.checkout(cmd, user_qq)
@@ -293,9 +293,9 @@ class reply_server:
 
         cmd = cmd.upper()  # cmd is case-insensitive
         if private:
-            self.cmd_info = self.db.get_cmd(cmd, real=True)  # alias is handled inside
+            self.cmd_info = self.db.get_private_cmd(self.user_info.user_id, cmd, real=True)
         else:
-            self.cmd_info = self.db.get_private_cmd(cmd, real=True)
+            self.cmd_info = self.db.get_cmd(cmd, real=True)  # alias is handled inside
 
         if self.cmd_info:
             if private:
@@ -307,11 +307,13 @@ class reply_server:
                 self.cur_dir = os.path.join(pic_dir, f"_{user_qq}", cmd)
             else:
                 self.cur_dir = os.path.join(pic_dir, cmd)
+        
+        if create and not os.path.exists(self.cur_dir) and (cmd_type & CMD_TYPE.PIC):
+            print("creating")
+            os.makedirs(self.cur_dir, exist_ok=True)
 
         if not self.cmd_info:
             if create:
-                if not os.path.exists(self.cur_dir) and (cmd_type & CMD_TYPE.PIC):
-                    os.mkdir(self.cur_dir)
                 self.cmd_info = self.add_alias(cmd, 0, cmd_type, 0, self.user_info.user_id)
 
         if create and cmd_type & self.cmd_info.cmd_type == 0:
@@ -675,7 +677,7 @@ class reply_server:
                     img.write(res.content)
                 if pic.private:
                     max_id = self.db.get_private_reply_max_id(self.user_info.user_id, self.cmd_info.cmd_id)
-                    if max_id < self.user_info.private_limit:
+                    if max_id >= self.user_info.private_limit:
                         raise ReplyLimitExceedException
                     max_id += 1
                     self.db.add_private_reply(self.cmd_info.cmd_id, CMD_TYPE.PIC, max_id, self.user_info.user_id, pic.Md5, img_type, pic.reply)
@@ -818,7 +820,7 @@ class reply_server:
         if len(cmd) and reply and len(reply):
             if self.checkout(cmd, user_qq, cmd_type=CMD_TYPE.TEXT_TAG, create=True, private=True):
                 max_id = self.db.get_private_reply_max_id(self.user_info.user_id, self.cmd_info.cmd_id)
-                if max_id < self.user_info.private_limit:
+                if max_id >= self.user_info.private_limit:
                     raise ReplyLimitExceedException
                 max_id += 1
                 self.db.add_private_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, max_id, user_id=self.user_info.user_id, reply=reply)
@@ -834,7 +836,7 @@ class reply_server:
             self.reply_type = REPLY_TYPE.PIC_MD5
             self.reply = reply_info.md5
             self.reply2 = reply_info.reply
-        elif reply_info.type == CMD_TYPE.TEXT:
+        elif reply_info.type == CMD_TYPE.TEXT_TAG:
             self.reply_type = REPLY_TYPE.TEXT
             self.reply = reply_info.reply
 
@@ -844,7 +846,7 @@ class reply_server:
         count = len(replies)
         if count > 0:
             ind = random.randint(1, count) - 1
-            reply_info = replies[ind].reply
+            reply_info = replies[ind]
             self.usage_increase(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
                                 replies[ind].type, replies[ind].reply_id, private=True)
         return reply_info
