@@ -15,6 +15,8 @@ from .cmd_dbi import cmdDB, cmdInfo, replyInfo, CMD_TYPE, userInfo, groupInfo
 from .exceptions import *
 
 
+# build-in cmd definition:
+
 class PicObj:
     user: str
     Url: str
@@ -139,7 +141,7 @@ class Selector:
 class reply_server:
 
     def __init__(self, async_server=True):
-        self.db = cmdDB()
+        self.db = cmdDB(use_regexp=True)
         self.cmd_info = cmdInfo()
         self.cur_dir = ""
         self.reply = ""  # 存储文字回复/图片MD5/路径
@@ -197,7 +199,10 @@ class reply_server:
         while self.cmd_queue and self.running:
             if not self.cmd_queue.empty():
                 ctx = self.cmd_queue.get()
-                self.handle_cmd(ctx)
+                try:
+                    self.handle_cmd(ctx)
+                except CmdLimitExceedException or ReplyLimitExceedException:
+                    pass
                 self.handle_reply(ctx)
                 time.sleep(0.3)
             else:
@@ -270,7 +275,7 @@ class reply_server:
 
         space_index = content.find(' ')  # 附带参数的关键词
         if space_index == -1:
-            checkout_good = self.checkout(content, user_qq, private=flag_at_me)
+            checkout_good = self.checkout(content, user_qq, private=flag_at_me, full=False)
         else:
             cmd = content[0:space_index]
             checkout_good = self.checkout(cmd, user_qq)
@@ -285,8 +290,15 @@ class reply_server:
 
         return self.random_reply(arg)
 
-    # check if cmd(keyword) exists, create one when not exists if "create" is specified
-    def checkout(self, cmd: str, user_qq: str, cmd_type=0, create=False, check_active=True, private=False):
+    def checkout(self, cmd: str, user_qq: str, cmd_type=0, create=False, check_active=True, private=False, full=True):
+        # 关键词检索函数, 或是新建关键词, 成功的话会对self.cmd_info赋值
+        # cmd: 关键词
+        # user_qq: 发送关键词的qq号
+        # cmd_type: 创建新关键词(或新类型回复)的类型
+        # create: 关键词不存在的话是否创建
+        # check: 是否检查active
+        # private: 是否为私人关键词检索
+
         self.user_info = get_user(user_qq)
         if not self.user_info:
             return False
@@ -295,7 +307,7 @@ class reply_server:
         if private:
             self.cmd_info = self.db.get_private_cmd(self.user_info.user_id, cmd, real=True)
         else:
-            self.cmd_info = self.db.get_cmd(cmd, real=True)  # alias is handled inside
+            self.cmd_info = self.db.get_cmd(cmd, real=True, full=full)  # alias is handled inside
 
         if self.cmd_info:
             if private:
@@ -334,7 +346,10 @@ class reply_server:
             return self.db.add_alias(cmd, parent, reply_type, level)
         else:
             max_id = self.db.get_private_cmd_max_id(user_id)
-            if max_id >= self.user_info.private_limit: # assume the user_info has been retrieved here
+            count = self.db.get_private_cmd_count(user_id)
+            if count >= self.user_info.private_limit:  # assume the user_info has been retrieved here
+                self.reply_type = REPLY_TYPE.TEXT
+                self.reply = "【系统错误: 私人关键词超过上限了！】"
                 raise CmdLimitExceedException
             else:
                 return self.db.add_private_alias(user_id, max_id+1, cmd, parent)
@@ -677,12 +692,15 @@ class reply_server:
                     img.write(res.content)
                 if pic.private:
                     max_id = self.db.get_private_reply_max_id(self.user_info.user_id, self.cmd_info.cmd_id)
-                    if max_id >= self.user_info.private_limit:
+                    count = self.db.get_private_reply_count(self.user_info.user_id, self.cmd_info.cmd_id)
+                    if count >= self.user_info.private_limit:
+                        self.reply_type = REPLY_TYPE.TEXT
+                        self.reply = f"【系统错误: 私人回复超过上限了！】"
                         raise ReplyLimitExceedException
                     max_id += 1
                     self.db.add_private_reply(self.cmd_info.cmd_id, CMD_TYPE.PIC, max_id, self.user_info.user_id, pic.Md5, img_type, pic.reply)
                     self.reply_type = REPLY_TYPE.TEXT
-                    self.reply = f"私聊图片回复已存储，关键词【{self.cmd_info.cmd}】 回复【{pic.reply}】"
+                    self.reply = f"私人图片回复已存储，关键词【{self.cmd_info.cmd}】 回复【{pic.reply}】"
                 else:
                     self.cmd_info.sequences[CMD_TYPE.PIC] += 1
                     new_reply_id = self.cmd_info.sequences[CMD_TYPE.PIC]
@@ -820,10 +838,12 @@ class reply_server:
         if len(cmd) and reply and len(reply):
             if self.checkout(cmd, user_qq, cmd_type=CMD_TYPE.TEXT_TAG, create=True, private=True):
                 max_id = self.db.get_private_reply_max_id(self.user_info.user_id, self.cmd_info.cmd_id)
-                if max_id >= self.user_info.private_limit:
+                count = self.db.get_private_reply_count(self.user_info.user_id, self.cmd_info.cmd_id)
+                if count >= self.user_info.private_limit:
+                    self.reply_type = REPLY_TYPE.TEXT
+                    self.reply = f"【系统错误: 私人回复超过上限了！】"
                     raise ReplyLimitExceedException
-                max_id += 1
-                self.db.add_private_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, max_id, user_id=self.user_info.user_id, reply=reply)
+                self.db.add_private_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, max_id+1, user_id=self.user_info.user_id, reply=reply)
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "私人回复存储成功，{}({}):{}".format(cmd, tag, reply)
             else:
