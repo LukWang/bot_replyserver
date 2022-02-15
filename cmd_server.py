@@ -38,7 +38,7 @@ class PicObj:
 cur_file_dir = os.path.dirname(os.path.realpath(__file__))
 pic_dir = ""
 super_user = ""
-user_record_level = 2
+user_record_level = 1
 # user_record_level:
 # 0: do not record
 # 1: cmd level record
