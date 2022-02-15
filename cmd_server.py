@@ -238,7 +238,7 @@ class reply_server:
         if ctx.MsgType == MsgTypes.PicMsg:
             pic_obj = self.parse_pic(ctx)
             if len(pic_obj.cmd):
-                    return self.save_pic(pic_obj)
+                return self.save_pic(pic_obj)
 
         target = None
         flag_at_me = False
@@ -352,7 +352,7 @@ class reply_server:
                 self.reply = "【系统错误: 私人关键词超过上限了！】"
                 raise CmdLimitExceedException
             else:
-                return self.db.add_private_alias(user_id, max_id+1, cmd, parent)
+                return self.db.add_private_alias(self.user_info.user_id, max_id+1, cmd, parent)
 
     def set_cmd_type(self, cmd, arg):
         if arg is None:
@@ -599,7 +599,7 @@ class reply_server:
             reply_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.PIC, reply_id)
         if reply_info:
             self.usage_increase(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
-                             CMD_TYPE.PIC, reply_info.reply_id)
+                                CMD_TYPE.PIC, reply_info.reply_id)
 
         return reply_info
 
@@ -621,7 +621,7 @@ class reply_server:
         if pic_info:
             file_name = '{}.{}'.format(pic_info.md5, pic_info.file_type)
             file_name = file_name.replace('/', 'SLASH')  # avoid path revolving issue
-            file_name = os.path.join(self.cur_dir,file_name)
+            file_name = os.path.join(self.cur_dir, file_name)
             self.reply=file_name
             self.reply_type = REPLY_TYPE.PIC_PATH
             self.reply2 = pic_info.reply
@@ -771,7 +771,7 @@ class reply_server:
                 self.db.add_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_FORMAT, new_reply_id, reply=reply, user_id=self.user_info.user_id)
                 self.db.set_cmd_seq(self.cmd_info.cmd_id, CMD_TYPE.TEXT_FORMAT, new_reply_id)
                 self.reply_type = REPLY_TYPE.TEXT
-                self.reply = "定形回复存储成功，{}({}):{}".format(cmd,arg,reply)
+                self.reply = "定形回复存储成功，{}({}):{}".format(cmd, arg, reply)
             else:
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "这个关键词好像用不了捏"
@@ -929,18 +929,3 @@ class plugin_manager:
         user_info = get_user(user_qq)
         if user_info:
             self.db.used_inc(user_info.user_id, self.cmd_id, self.cmd_id, CMD_TYPE.PLUGIN, 0)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
