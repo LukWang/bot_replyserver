@@ -200,7 +200,7 @@ class reply_server:
                 ctx = self.cmd_queue.get()
                 try:
                     self.handle_cmd(ctx)
-                except CmdLimitExceedException or ReplyLimitExceedException or CmdLengthExceedException or CmdWithRegExpException:
+                except (CmdLimitExceedException, ReplyLimitExceedException, CmdLengthExceedException, CmdWithRegExpException):
                     logger.warning("limit exceed exception")
                 self.handle_reply(ctx)
                 time.sleep(0.3)
@@ -300,7 +300,7 @@ class reply_server:
         if re.match("[\^*$+|]+", cmd):
             self.reply_type = REPLY_TYPE.TEXT
             self.reply = "【系统错误: 非法关键词！关键词疑似包含正则表达式】"
-            raise CmdLengthWithRegExpException
+            raise CmdWithRegExpException
 
     def checkout(self, cmd: str, user_qq: str, cmd_type=0, create=False, check_active=True, private=False, full=True):
         # 关键词检索函数, 或是新建关键词, 成功的话会对self.cmd_info赋值
