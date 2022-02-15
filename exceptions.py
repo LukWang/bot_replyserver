@@ -4,3 +4,11 @@ class CmdLimitExceedException(Exception):
 
 class ReplyLimitExceedException(Exception):
     pass
+
+
+class CmdLengthExceedException(Exception):
+    pass
+
+
+class CmdWithRegExpException(Exception):
+    pass

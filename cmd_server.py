@@ -57,7 +57,6 @@ except:
     logger.error('config error')
     raise
 
-
 g_user_cache = {}
 g_group_cache = {}
 
@@ -133,7 +132,7 @@ class Selector:
         while index < len(self.candies):
             if result <= self.weights[index]:
                 break
-            index += 1 
+            index += 1
 
         return self.candies[index]
 
@@ -201,7 +200,7 @@ class reply_server:
                 ctx = self.cmd_queue.get()
                 try:
                     self.handle_cmd(ctx)
-                except CmdLimitExceedException or ReplyLimitExceedException:
+                except CmdLimitExceedException or ReplyLimitExceedException or CmdLengthExceedException or CmdWithRegExpException:
                     logger.warning("limit exceed exception")
                 self.handle_reply(ctx)
                 time.sleep(0.3)
@@ -214,7 +213,8 @@ class reply_server:
                 if self.reply_type == REPLY_TYPE.PIC_MD5:
                     self.action.sendGroupPic(ctx.FromGroupId, content=self.reply2, picMd5s=self.reply)
                 elif self.reply_type == REPLY_TYPE.PIC_PATH:
-                    self.action.sendGroupPic(ctx.FromGroupId, content=self.reply2, picBase64Buf=file_to_base64(self.reply))
+                    self.action.sendGroupPic(ctx.FromGroupId, content=self.reply2,
+                                             picBase64Buf=file_to_base64(self.reply))
                 elif self.reply_type == REPLY_TYPE.TEXT:
                     self.action.sendGroupText(ctx.FromGroupId, content=self.reply, atUser=self.reply_at)
                 elif self.reply_type == REPLY_TYPE.VOICE:
@@ -291,6 +291,17 @@ class reply_server:
 
         return self.random_reply(arg)
 
+    def cmd_check(self, cmd):
+        if len(cmd) > 15:
+            self.reply_type = REPLY_TYPE.TEXT
+            self.reply = "【系统错误: 关键词长度不能大于15个字符!】"
+            raise CmdLengthExceedException
+
+        if re.match("[\^*$+|]+", cmd):
+            self.reply_type = REPLY_TYPE.TEXT
+            self.reply = "【系统错误: 非法关键词！关键词疑似包含正则表达式】"
+            raise CmdLengthWithRegExpException
+
     def checkout(self, cmd: str, user_qq: str, cmd_type=0, create=False, check_active=True, private=False, full=True):
         # 关键词检索函数, 或是新建关键词, 成功的话会对self.cmd_info赋值
         # cmd: 关键词
@@ -305,6 +316,9 @@ class reply_server:
             return False
 
         cmd = cmd.upper()  # cmd is case-insensitive
+        if create:
+            self.cmd_check(cmd)
+
         if private:
             self.cmd_info = self.db.get_private_cmd(self.user_info.user_id, cmd, real=True)
         else:
@@ -320,11 +334,12 @@ class reply_server:
                 self.cur_dir = os.path.join(pic_dir, f"_{user_qq}", cmd)
             else:
                 self.cur_dir = os.path.join(pic_dir, cmd)
-        
+
         if create and not os.path.exists(self.cur_dir) and (cmd_type & CMD_TYPE.PIC):
             os.makedirs(self.cur_dir, exist_ok=True)
 
         if not self.cmd_info:
+
             if create:
                 self.cmd_info = self.add_alias(cmd, 0, cmd_type, 0, private)
 
@@ -352,7 +367,7 @@ class reply_server:
                 self.reply = "【系统错误: 私人关键词超过上限了！】"
                 raise CmdLimitExceedException
             else:
-                return self.db.add_private_alias(self.user_info.user_id, max_id+1, cmd, parent)
+                return self.db.add_private_alias(self.user_info.user_id, max_id + 1, cmd, parent)
 
     def set_cmd_type(self, cmd, arg):
         if arg is None:
@@ -534,7 +549,7 @@ class reply_server:
                     self.cmd_info.sequences[CMD_TYPE.TEXT_FORMAT] > 0):
                 return self.random_ftext(arg)
             elif ((CMD_TYPE.PIC & self.cmd_info.cmd_type) and
-                    self.cmd_info.sequences[CMD_TYPE.PIC] > 0):
+                  self.cmd_info.sequences[CMD_TYPE.PIC] > 0):
                 return self.random_pic(arg)
 
         cmd_selector = Selector()
@@ -584,7 +599,7 @@ class reply_server:
             self.reply = reply_info.reply.format(arg)
             self.reply_type = REPLY_TYPE.TEXT
             self.usage_increase(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
-                             CMD_TYPE.TEXT_FORMAT, reply_info.reply_id)
+                                CMD_TYPE.TEXT_FORMAT, reply_info.reply_id)
 
     def _random_pic(self, tag) -> replyInfo:
         reply_info = None
@@ -612,7 +627,7 @@ class reply_server:
     def random_pic_md5(self, tag):
         pic_info = self._random_pic(tag)
         if pic_info:
-            self.reply=pic_info.md5
+            self.reply = pic_info.md5
             self.reply_type = REPLY_TYPE.PIC_MD5
             self.reply2 = pic_info.reply
 
@@ -622,7 +637,7 @@ class reply_server:
             file_name = '{}.{}'.format(pic_info.md5, pic_info.file_type)
             file_name = file_name.replace('/', 'SLASH')  # avoid path revolving issue
             file_name = os.path.join(self.cur_dir, file_name)
-            self.reply=file_name
+            self.reply = file_name
             self.reply_type = REPLY_TYPE.PIC_PATH
             self.reply2 = pic_info.reply
 
@@ -638,7 +653,8 @@ class reply_server:
             self.usage_increase(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
                                 CMD_TYPE.VOICE, voice_info.reply_id)
             self.reply_type = REPLY_TYPE.VOICE
-            self.reply = os.path.join(voice_dir, "{}/{}.{}".format(self.cmd_info.cmd, voice_info.tag, voice_info.file_type))
+            self.reply = os.path.join(voice_dir,
+                                      "{}/{}.{}".format(self.cmd_info.cmd, voice_info.tag, voice_info.file_type))
 
     @staticmethod
     def find_imgtype(type_str):
@@ -677,7 +693,8 @@ class reply_server:
         return pic_obj
 
     def save_pic(self, pic: PicObj, no_checkout=False):
-        if pic.Url and (no_checkout or self.checkout(pic.cmd, pic.user, cmd_type=CMD_TYPE.PIC, create=True, private=pic.private)):
+        if pic.Url and (no_checkout or self.checkout(pic.cmd, pic.user, cmd_type=CMD_TYPE.PIC, create=True,
+                                                     private=pic.private)):
             try:
                 res = httpx.get(pic.Url)
                 res.raise_for_status()
@@ -698,13 +715,15 @@ class reply_server:
                         self.reply = f"【系统错误: 私人回复超过上限了！】"
                         raise ReplyLimitExceedException
                     max_id += 1
-                    self.db.add_private_reply(self.cmd_info.cmd_id, CMD_TYPE.PIC, max_id, self.user_info.user_id, pic.Md5, img_type, pic.reply)
+                    self.db.add_private_reply(self.cmd_info.cmd_id, CMD_TYPE.PIC, max_id, self.user_info.user_id,
+                                              pic.Md5, img_type, pic.reply)
                     self.reply_type = REPLY_TYPE.TEXT
                     self.reply = f"私人图片回复已存储，关键词【{self.cmd_info.cmd}】 回复【{pic.reply}】"
                 else:
                     self.cmd_info.sequences[CMD_TYPE.PIC] += 1
                     new_reply_id = self.cmd_info.sequences[CMD_TYPE.PIC]
-                    self.db.add_reply(self.cmd_info.cmd_id, CMD_TYPE.PIC, new_reply_id, tag=pic.tag, md5=pic.Md5, file_type=img_type, reply=pic.reply, user_id=self.user_info.user_id)
+                    self.db.add_reply(self.cmd_info.cmd_id, CMD_TYPE.PIC, new_reply_id, tag=pic.tag, md5=pic.Md5,
+                                      file_type=img_type, reply=pic.reply, user_id=self.user_info.user_id)
                     self.db.set_cmd_seq(self.cmd_info.cmd_id, CMD_TYPE.PIC, new_reply_id)
                     self.reply_type = REPLY_TYPE.TEXT
                     self.reply = f"图片回复已存储，关键词【{self.cmd_info.cmd}】 tag【{pic.tag}】 回复【{pic.reply}】"
@@ -713,14 +732,14 @@ class reply_server:
             except Exception as e:
                 logger.warning('Failed to get picture from url:{},{}'.format(pic.Url, e))
                 raise
-        
+
         return False
 
     @staticmethod
     def get_next_arg(cmd):
         space_index = cmd.find(' ')
         if space_index > 0:
-            return cmd[0:space_index], cmd[space_index+1:]
+            return cmd[0:space_index], cmd[space_index + 1:]
         else:
             return cmd, None
 
@@ -733,17 +752,17 @@ class reply_server:
         if space_index > 0:
             arg = cmd[space_index + 1:]
             cmd = cmd[0:space_index]
-        
+
         if arg == "":
             space_index = cmd.find('reply')
             if space_index >= 0:
-                reply = reply[space_index+5:]
+                reply = reply[space_index + 5:]
                 cmd = cmd[:space_index]
                 cmd = cmd.strip()
         else:
             space_index = arg.find('reply')
             if space_index >= 0:
-                reply = arg[space_index+5:]
+                reply = arg[space_index + 5:]
                 arg = arg[0:space_index]
                 arg = arg.strip()
 
@@ -755,7 +774,8 @@ class reply_server:
         if len(cmd) and reply and len(reply):
             if self.checkout(cmd, user_qq, cmd_type=CMD_TYPE.TEXT_TAG, create=True):
                 new_reply_id = self.cmd_info.sequences[CMD_TYPE.TEXT_TAG] + 1
-                self.db.add_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, new_reply_id, tag=tag, reply=reply, user_id=self.user_info.user_id)
+                self.db.add_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, new_reply_id, tag=tag, reply=reply,
+                                  user_id=self.user_info.user_id)
                 self.db.set_cmd_seq(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, new_reply_id)
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "回复存储成功，{}({}):{}".format(cmd, tag, reply)
@@ -768,7 +788,8 @@ class reply_server:
         if len(cmd) and len(reply):
             if self.checkout(cmd, user_qq, cmd_type=CMD_TYPE.TEXT_FORMAT, create=True):
                 new_reply_id = self.cmd_info.sequences[CMD_TYPE.TEXT_FORMAT] + 1
-                self.db.add_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_FORMAT, new_reply_id, reply=reply, user_id=self.user_info.user_id)
+                self.db.add_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_FORMAT, new_reply_id, reply=reply,
+                                  user_id=self.user_info.user_id)
                 self.db.set_cmd_seq(self.cmd_info.cmd_id, CMD_TYPE.TEXT_FORMAT, new_reply_id)
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "定形回复存储成功，{}({}):{}".format(cmd, arg, reply)
@@ -779,7 +800,7 @@ class reply_server:
     def save_alias(self, cmd):
         space_index = cmd.find(' ')
         if space_index > 0:
-            p_cmd = cmd[space_index+1:]
+            p_cmd = cmd[space_index + 1:]
             p_cmd = p_cmd.strip()
             cmd = cmd[0:space_index]
             if self.checkout(cmd, super_user, check_active=False):
@@ -797,7 +818,7 @@ class reply_server:
         if ext_ind == -1:
             return file_name, ""
         else:
-            return file_name[:ext_ind], file_name[ext_ind+1:]
+            return file_name[:ext_ind], file_name[ext_ind + 1:]
 
     def scan_voice_sub_dir(self, cmd, sub_dir):
         record = ""
@@ -823,7 +844,7 @@ class reply_server:
         voice_subs = os.listdir(voice_dir)
         for cmd in voice_subs:
             sub_dir = os.path.join(voice_dir, cmd)
-            print("find:"+sub_dir)
+            print("find:" + sub_dir)
             if os.path.isdir(sub_dir):
                 if not self.checkout(cmd, super_user, cmd_type=CMD_TYPE.VOICE, create=True):
                     self.reply = "命令索引创建/查找失败"
@@ -843,7 +864,8 @@ class reply_server:
                     self.reply_type = REPLY_TYPE.TEXT
                     self.reply = f"【系统错误: 私人回复超过上限了！】"
                     raise ReplyLimitExceedException
-                self.db.add_private_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, max_id+1, user_id=self.user_info.user_id, reply=reply)
+                self.db.add_private_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, max_id + 1,
+                                          user_id=self.user_info.user_id, reply=reply)
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "私人回复存储成功，{}({}):{}".format(cmd, tag, reply)
             else:
