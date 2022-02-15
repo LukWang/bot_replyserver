@@ -12,3 +12,7 @@ class CmdLengthExceedException(Exception):
 
 class CmdWithRegExpException(Exception):
     pass
+
+
+class CmdStartsWithBuiltInKeyException(Exception):
+    pass

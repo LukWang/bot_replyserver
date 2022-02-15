@@ -54,13 +54,13 @@ class userInfo:
     user_id: int
     permission: int
     private_limit: int
-    qq: str
+    qq: int
 
 
 class groupInfo:
     group_id: int
     enable: int
-    qq: str
+    qq: int
 
 
 def match(keyword, string):
