@@ -151,7 +151,7 @@ class cmdDB:
         cmd_info = None
         sql = "select id, p_cmd_id, active, type, level, sequence_1, sequence_2, sequence_4, sequence_8, cmd from cmd_alias"
         if not full and self.use_regexp:
-            sql += " where match(cmd, ?)"
+            sql += " where active=1 and match(cmd, ?)"
         else:
             sql += " where cmd = ?"
         self.db.execute(sql, (cmd,))

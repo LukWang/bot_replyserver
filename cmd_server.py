@@ -202,7 +202,7 @@ class reply_server:
                 try:
                     self.handle_cmd(ctx)
                 except CmdLimitExceedException or ReplyLimitExceedException:
-                    pass
+                    logger.warning("limit exceed exception")
                 self.handle_reply(ctx)
                 time.sleep(0.3)
             else:
@@ -238,7 +238,8 @@ class reply_server:
         if ctx.MsgType == MsgTypes.PicMsg:
             pic_obj = self.parse_pic(ctx)
             if len(pic_obj.cmd):
-                return self.save_pic(pic_obj)
+                self.save_pic(pic_obj)
+            return
 
         target = None
         flag_at_me = False
@@ -321,7 +322,6 @@ class reply_server:
                 self.cur_dir = os.path.join(pic_dir, cmd)
         
         if create and not os.path.exists(self.cur_dir) and (cmd_type & CMD_TYPE.PIC):
-            print("creating")
             os.makedirs(self.cur_dir, exist_ok=True)
 
         if not self.cmd_info:
