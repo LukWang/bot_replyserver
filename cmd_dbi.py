@@ -64,7 +64,9 @@ class groupInfo:
 
 
 def match(keyword, string):
-    ret = re.match(f"^{keyword}", string) or re.match(f"{keyword}$", string)
+    ret = re.match(f"^{keyword}", string)
+    if not ret:
+        ret = re.match(f".*{keyword}$", string)
     return ret is not None
 
 
@@ -74,6 +76,9 @@ class cmdDB:
         self.db = self.conn.cursor()
         self.use_regexp = use_regexp
         self.conn.create_function("MATCH", 2, match)
+
+    def __del__(self):
+        self.conn.close()
 
     def use_regexp(self, use_regexp):
         self.use_regexp = use_regexp

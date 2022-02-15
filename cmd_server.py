@@ -326,7 +326,7 @@ class reply_server:
 
         if not self.cmd_info:
             if create:
-                self.cmd_info = self.add_alias(cmd, 0, cmd_type, 0, self.user_info.user_id)
+                self.cmd_info = self.add_alias(cmd, 0, cmd_type, 0, private)
 
         if create and cmd_type & self.cmd_info.cmd_type == 0:
             self.db.set_cmd_type(self.cmd_info.cmd_id, cmd_type | self.cmd_info.cmd_type)
@@ -340,13 +340,13 @@ class reply_server:
 
         return True
 
-    def add_alias(self, cmd, parent, reply_type, level, user_id=0):
+    def add_alias(self, cmd, parent, reply_type, level, private=False):
         # 这里不会检查alias是否已经存在, 请在调用处检查
-        if user_id == 0:  # Public cmd alias
+        if not private:  # Public cmd alias
             return self.db.add_alias(cmd, parent, reply_type, level)
         else:
-            max_id = self.db.get_private_cmd_max_id(user_id)
-            count = self.db.get_private_cmd_count(user_id)
+            max_id = self.db.get_private_cmd_max_id(self.user_info.user_id)
+            count = self.db.get_private_cmd_count(self.user_info.user_id)
             if count >= self.user_info.private_limit:  # assume the user_info has been retrieved here
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "【系统错误: 私人关键词超过上限了！】"
@@ -676,8 +676,8 @@ class reply_server:
 
         return pic_obj
 
-    def save_pic(self, pic: PicObj):
-        if pic.Url and self.checkout(pic.cmd, pic.user, cmd_type=CMD_TYPE.PIC, create=True, private=pic.private):
+    def save_pic(self, pic: PicObj, no_checkout=False):
+        if pic.Url and (no_checkout or self.checkout(pic.cmd, pic.user, cmd_type=CMD_TYPE.PIC, create=True, private=pic.private)):
             try:
                 res = httpx.get(pic.Url)
                 res.raise_for_status()
