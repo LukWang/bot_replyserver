@@ -3,16 +3,50 @@ import json
 import re
 
 
-def common_group_middleware(ctx: GroupMsg):
+class picObj:
+    url: str
+    md5: str
+
+    def __init__(self):
+        url = ""
+        md5 = ""
+
+
+class commonContext:
+    from_user: int
+    from_group: int
+    content: str
+    at_target: list
+    pic: picObj
+
+    def __init__(self):
+        from_user = ""
+        from_group = 0
+        content = ""
+        at_target = []
+        pic = None
+
+
+def common_group_parser(ctx: GroupMsg) -> commonContext:
+    common_ctx = commonContext()
+    common_ctx.from_user = GroupMsg.FromUserId
+    common_ctx.from_group = GroupMsg.FromGroupId
     if GroupMsg.MsgType == MsgTypes.PicMsg or GroupMsg.MsgType == MsgTypes.AtMsg:
         content_json = json.loads(ctx.Content)
-        ctx.Content = content_json["Content"]
+        common_ctx.Content = content_json["Content"]
         if "UserExt" in content_json:
-            ctx.target = []
             for user in content_json["UserExt"]:
-                ctx.Content = re.sub(f"@{user['QQNick']}\\s+", "", ctx.Content)
-                ctx.target.append(user['QQUid'])
+                common_ctx.content = re.sub(f"@{user['QQNick']}\\s+", "", ctx.Content)
+                common_ctx.at_target.append(user['QQUid'])
 
+        if "GroupPic" in content_json:
+            common_ctx.pic = picObj()
+            common_ctx.pic.md5 = content_json["GroupPic"][0]["FileMd5"]
+            common_ctx.pic.url = content_json["GroupPic"][0]["Url"]
+    else:
+        common_ctx.content = ctx.Content
+
+    return common_ctx
 
 '''
             {
