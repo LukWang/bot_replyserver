@@ -20,23 +20,25 @@ class commonContext:
     pic: picObj
 
     def __init__(self):
-        from_user = ""
-        from_group = 0
-        content = ""
-        at_target = []
-        pic = None
+        self.from_user = 0
+        self.from_group = 0
+        self.content = ""
+        self.at_target = []
+        self.pic = None
 
 
 def common_group_parser(ctx: GroupMsg) -> commonContext:
     common_ctx = commonContext()
-    common_ctx.from_user = GroupMsg.FromUserId
-    common_ctx.from_group = GroupMsg.FromGroupId
-    if GroupMsg.MsgType == MsgTypes.PicMsg or GroupMsg.MsgType == MsgTypes.AtMsg:
+    common_ctx.from_user = ctx.FromUserId
+    common_ctx.from_group = ctx.FromGroupId
+    if ctx.MsgType == MsgTypes.PicMsg or ctx.MsgType == MsgTypes.AtMsg:
         content_json = json.loads(ctx.Content)
-        common_ctx.Content = content_json["Content"]
+        if "Content" not in content_json:
+            return None
+        common_ctx.content = content_json["Content"]
         if "UserExt" in content_json:
             for user in content_json["UserExt"]:
-                common_ctx.content = re.sub(f"@{user['QQNick']}\\s+", "", ctx.Content)
+                common_ctx.content = re.sub(f"@{user['QQNick']}\\s+", "", common_ctx.content)
                 common_ctx.at_target.append(user['QQUid'])
 
         if "GroupPic" in content_json:

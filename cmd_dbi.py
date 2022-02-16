@@ -360,7 +360,7 @@ class cmdDB:
 
     def get_all_private_cmd(self, user_id):
         cmds = []
-        self.db.execute("select id, p_cmd_id, cmd, active from p_cmd_alias where user_id = ? order by id", (user_id, ))
+        self.db.execute("select cmd_id, p_cmd_id, cmd, active from p_cmd_alias where user_id = ? order by cmd_id", (user_id, ))
         rows = self.db.fetchall()
         if rows is not None:
             for row in rows:

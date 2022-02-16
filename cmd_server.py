@@ -16,28 +16,10 @@ from .common_parser import common_group_parser, commonContext, picObj
 
 
 # build-in cmd definition:
-'''
-class PicObj:
-    user: str
-    Url: str
-    Md5: str
-    cmd: str
-    tag: str
-    reply: str
-    private: bool
-
-    def __init__(self):
-        self.user = ""
-        self.Url = ""
-        self.Md5 = ""
-        self.cmd = ""
-        self.tag = ""
-        self.reply = ""
-'''
 
 cur_file_dir = os.path.dirname(os.path.realpath(__file__))
 pic_dir = ""
-super_user = ""
+super_user = 0
 user_record_level = 1
 # user_record_level:
 # 0: do not record
@@ -183,16 +165,16 @@ class reply_server:
 
     @staticmethod
     def help_self():
-        return "欢迎使用调教助手，你的可用关键词:\n" \
+        return "欢迎使用调教助手\n" \
                "【调教方法】\n" \
                "发送【存回复 关键词 tag(可选) reply回复（可选）】+【图片(可选)】 存储回复\n" \
                "也可以发送【存图片回复 关键词 tag(可选) reply回复（可选）】开启图片存储会话\n" \
                "发送【存同义词 子关键词 父关键词】建立同义词关联\n" \
-               "发送【对话列表】查看可用的关键词" \
+               "发送【对话列表】查看可用的关键词\n" \
                "例:\n" \
                "存回复色色 reply不许色色！\n" \
                "存同义词我要色色 色色\n" \
-               "可别教我奇怪的东西！"
+               "\n可别教我奇怪的东西哦"
 
     def reply_super(self, reply: str):
         self.action.sendFriendText(super_user, reply)
@@ -210,7 +192,8 @@ class reply_server:
             common_context = None
             if isinstance(ctx, GroupMsg):
                 common_context = common_group_parser(ctx)
-            self.cmd_queue.put(common_context)
+            if common_context:
+                self.cmd_queue.put(common_context)
 
     def wait_for_msg(self):
         self.running = True
@@ -244,14 +227,17 @@ class reply_server:
         self.reply_type = 0
         self.reply = ""
         flag_at_me = False
+        target_qq = 0
 
         if ctx.from_group:
             self.group_flag = True
         else:
             self.group_flag = False
 
-        if len(ctx.at_target) and jconfig.bot in ctx.at_target:
-            flag_at_me = True
+        if len(ctx.at_target):
+            target_qq = ctx.at_target[0]
+            if jconfig.bot in ctx.at_target:
+                flag_at_me = True
 
         if flag_at_me or len(ctx.at_target) == 0:
             if ctx.content == "帮助":
@@ -261,9 +247,9 @@ class reply_server:
             elif ctx.content == "_scanvoice":
                 return self.scan_voice_dir()
             elif re.match("^存.{1,}", ctx.content):
-                return self.handle_save_cmd(ctx.content[5:], ctx.from_user, ctx.pic)
+                return self.handle_save_cmd(ctx.content[1:], ctx.from_user, ctx.pic)
             elif re.match("^_set.{1,}", ctx.content):
-                return self.handle_set_cmd(ctx.content[4:], ctx.from_user, ctx.at_target[0])
+                return self.handle_set_cmd(ctx.content[4:], ctx.from_user, target_qq)
             elif re.match("^_disable.{1,}", ctx.content):
                 return self.set_cmd_active(ctx.content[8:], 0, ctx.from_user, ctx.from_group)
             elif re.match("^_enable.{1,}", ctx.content):
@@ -426,7 +412,8 @@ class reply_server:
                 self.reply = "找不到关键词【{}】捏".format(cmd)
 
     def set_permission(self, target_qq: int, permission):
-        if not target_qq:
+        print(target_qq)
+        if target_qq == 0:
             target_qq = super_user
         if not permission:
             return
@@ -467,7 +454,7 @@ class reply_server:
             if cmds is None:
                 return output_text
             for cmd in cmds:
-                if cmd.active and cmd.level < user_info.permission:
+                if cmd.active and cmd.level <= user_info.permission:
                     if cmd.orig_id == 0:
                         out_str = cmd.cmd
                         if not private and user_info.permission > 50:  # 权限大于一定值显示每项关键词的回复数量
@@ -512,7 +499,7 @@ class reply_server:
         public_cmd = self.list_cmd(user_qq, private=False)
         private_cmd = self.list_cmd(user_qq, private=True)
 
-        template = f"你可用的公共列表:\n{public_cmd}\n-------------你可用的私人列表:\n{private_cmd}"
+        template = f"你可用的公共列表:\n{public_cmd}\n-------------\n你可用的私人列表:\n{private_cmd}"
         if self.checkout(bot_primary_cmd, user_qq):
             template += "[PICFLAG]"
             self.random_pic("")
@@ -524,7 +511,7 @@ class reply_server:
     def handle_save_cmd(self, cmd, user_qq: int, pic: picObj):
         logger.info('saving {}'.format(cmd))
         if re.match("^回复.{1,}", cmd):
-            self.handle_save_reply(cmd[2:], user_qq, pic, private=True)
+            self.handle_save_reply(cmd[2:], user_qq, pic, private=False)
         elif re.match("^私人回复.{1,}", cmd):  # save private text
             return self.handle_save_reply(cmd[4:], user_qq, pic, private=True)
         elif re.match("^同义词.{1,}", cmd):  # save alias
