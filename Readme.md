@@ -1,15 +1,15 @@
-# 回复管理引擎
+# OPQBOT的回复管理引擎
 
 ## 简介
 
-一个基于数据库的botoy群聊回复处理扩展
+一个基于数据库的botoy群聊回复管理扩展
 
 该项目稍作修改也可以直接作为botoy的单独插件使用，但更推荐作为模块通过在插件内调用的方式使用
 
 所集成的功能有：
 1. 基于关键词的公共问答管理（支持图片，文字，语音消息）
 2. 基于关键词的私人问答管理（支持图片，文字）
-3. 根据Tag查找回复
+3. 根据标签查找回复
 4. 关键词同义词定义
 5. 权限等级管理
 6. 用户使用情况记录
@@ -159,7 +159,7 @@ _setcmd [关键词] [数字等级]
 例：
 
 ```python
-from replyManager.deco import plugin_register
+from replyEngine.deco import plugin_register
 
 plugin_name = "插件1"
 plugin_helper = "这是插件1的帮助说明"
@@ -178,3 +178,9 @@ super_user可以通过在群聊发送"禁用"和"启用"命令来控制插件在
 同时可以让用户发送帮助+插件名称来查看每个插件的具体使用方法
 
 如果尼在装饰器装饰的函数内返回 True, 装饰器还会在数据库中增加插件的使用记录
+
+## 感谢
+
+[xiyaowong/botoy](https://github.com/opq-osc/botoy)
+
+[opq-osc/OPQ-SetuBot](https://github.com/opq-osc/OPQ-SetuBot)
