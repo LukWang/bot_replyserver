@@ -15,10 +15,10 @@ except:
 
 # enums
 class CMD_TYPE:
-    PIC = 1
-    TEXT_TAG = 2
-    TEXT_FORMAT = 4
-    VOICE = 8
+    PIC = 1          # 0001
+    TEXT_TAG = 2     # 0010
+    TEXT_FORMAT = 4  # 0100
+    VOICE = 8        # 1000
     PLUGIN = 1000
 
 
