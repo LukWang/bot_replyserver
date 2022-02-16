@@ -10,39 +10,50 @@ import re
 import queue
 from typing import Union
 
-from .cmd_dbi import cmdDB, cmdInfo, replyInfo, CMD_TYPE, userInfo, groupInfo
+from .cmd_dbi import cmdDB, cmdInfo, replyInfo, CMD_TYPE
 from .exceptions import *
 from .common_parser import common_group_parser, commonContext, picObj
 
-
-# build-in cmd definition:
-
 cur_file_dir = os.path.dirname(os.path.realpath(__file__))
-pic_dir = ""
-super_user = 0
-user_record_level = 1
+pic_dir = ""  # 用于存放下载图片的路径
+voice_dir = ""  # 用于存放语音回复的路径
+super_user = 0  # bot主人的qq
+private_limit = 10  # 私聊回复与关键词的数量限制
+user_record_level = 1  # 用户行为记录的等级
 # user_record_level:
 # 0: do not record
 # 1: cmd level record
 # 2: reply_level_record
-bot_primary_cmd = "FUFU"  # bot的主题图库, 用于在_listcmd时挑选显示的图片
+
+cmd_search_regexp = True  # 查询关键字时是否使用正则匹配
+bot_primary_cmd = "FUFU"  # bot的主题图库, 用于在生成【对话列表】时挑选显示的图片
 
 try:
     with open(cur_file_dir + '/config.json', 'r', encoding='utf-8') as f:
         config = json.load(f)
-        pic_dir = config['pic_dir']
-        voice_dir = config['voice_dir']
         super_user = config["super_user"]
+        if "pic_dir" in config:
+            pic_dir = config['pic_dir']
+        else:
+            pic_dir = os.path.join(cur_file_dir, "pics")
+        if "voice_dir" in config:
+            voice_dir = config['voice_dir']
+        else:
+            voice_dir = os.path.join(cur_file_dir, "voice")
         if "user_record_level" in config:
             user_record_level = config["user_record_level"]
+        if "private_limit" in config:
+            private_limit = config["user_record_level"]
 except:
     logger.error('config error')
     raise
+
 
 g_user_cache = {}
 g_group_cache = {}
 
 
+# 可能的回复类型
 class REPLY_TYPE:
     PIC_MD5 = 1
     PIC_PATH = 2
@@ -50,9 +61,10 @@ class REPLY_TYPE:
     VOICE = 4
 
 
-built_in_keywords = ("_", "存", "对话列表", "帮助")
+# 内建命令的开头，禁止作为关键词的开头存储
+built_in_keywords = ("_", "存", "对话列表", "帮助", "禁用", "启用")
 
-
+# 可存储的回复类型
 CMD_TYPE_LIST = [CMD_TYPE.PIC, CMD_TYPE.TEXT_TAG, CMD_TYPE.TEXT_FORMAT, CMD_TYPE.VOICE]
 
 
@@ -61,16 +73,17 @@ def get_user(user_qq: int):
     user_info = None
     if user_qq in g_user_cache:
         user_info = g_user_cache[user_qq]
-        logger.debug("Cached qq：{} id：{} perm: {}".format(user_qq, user_info.user_id, user_info.permission))
     else:
         db = cmdDB()
         user_info = db.get_user(user_qq)
         if user_info:
+            user_info.private_limit = private_limit
             g_user_cache[user_qq] = user_info
         else:
             db.add_user(user_qq)
             user_info = db.get_user(str(user_qq))
             if user_info:
+                user_info.private_limit = private_limit
                 g_user_cache[user_qq] = user_info
 
     return user_info
@@ -81,7 +94,6 @@ def get_group(group_qq: int):
     group_info = None
     if group_qq in g_group_cache:
         group_info = g_group_cache[group_qq]
-        logger.debug("get cached group_info qq:{}, enable:{}".format(group_qq, group_info.enable))
     else:
         db = cmdDB()
         group_info = db.get_group(group_qq)
@@ -96,7 +108,7 @@ def get_group(group_qq: int):
     return group_info
 
 
-# A random shuffler with weight
+# 一个带权重的随机器
 class Selector:
     def __init__(self):
         self.candies = []
@@ -122,12 +134,13 @@ class Selector:
         return self.candies[index]
 
 
-class reply_server:
+# 消息回复类
+class replyServer:
 
     def __init__(self, async_server=True):
-        self.db = cmdDB(use_regexp=True)
+        self.db = cmdDB(use_regexp=cmd_search_regexp)
         self.cmd_info = cmdInfo()
-        self.cur_dir = ""
+        self.cur_dir = ""  # 文件的操作路径
         self.reply = ""  # 存储文字回复/图片MD5/路径
         self.reply2 = ""  # 存储图片附带回复
         self.reply_type = 0
@@ -143,49 +156,85 @@ class reply_server:
             self.cmd_queue = queue.Queue()
             self.action = Action(jconfig.bot, host=jconfig.host, port=jconfig.port)
 
-    def help(self, group_qq: int):
-        cmds = self.db.get_all_cmd(CMD_TYPE.PLUGIN)
-        p_mgr = plugin_manager()
-        help_content = "本群已启用功能:\n"
-        content_off = "\n------------\n以下功能已禁用:\n"
-        off = False
-        for cmd in cmds:
-            if cmd.active:
-                if p_mgr.checkout(group_qq=group_qq, cmd_id=cmd.cmd_id):
-                    help_content += f"\u26aa {cmd.cmd}\n"
-                else:
-                    off = True
-                    content_off += f"\u2716 {cmd.cmd}\n"
+    def checkout(self, cmd: str, user_qq: int, cmd_type=0, create=False, check_active=True, private=False, full=True):
+        # 关键词检索函数, 或是新建关键词, 成功的话会对self.cmd_info赋值
+        # cmd: 关键词
+        # user_qq: 发送关键词的qq号
+        # cmd_type: 创建新关键词(或新类型回复)的类型
+        # create: 关键词不存在的话是否创建
+        # check: 是否检查active
+        # private: 是否为私人关键词检索
 
-        help_content += "输入 【帮助+功能】 查看各功能详情"
-        if off:
-            help_content += content_off
-        self.reply_type = REPLY_TYPE.TEXT
-        self.reply = help_content
+        self.user_info = get_user(user_qq)
+        if not self.user_info:
+            return False
 
-    @staticmethod
-    def help_self():
-        return "欢迎使用调教助手\n" \
-               "【调教方法】\n" \
-               "发送【存回复 关键词 tag(可选) reply回复（可选）】+【图片(可选)】 存储回复\n" \
-               "也可以发送【存图片回复 关键词 tag(可选) reply回复（可选）】开启图片存储会话\n" \
-               "发送【存同义词 子关键词 父关键词】建立同义词关联\n" \
-               "发送【对话列表】查看可用的关键词\n" \
-               "例:\n" \
-               "存回复色色 reply不许色色！\n" \
-               "存同义词我要色色 色色\n" \
-               "\n可别教我奇怪的东西哦"
+        if self.user_info.permission <= 0:
+            return False
+
+        cmd = cmd.strip().upper()  # cmd is case-insensitive
+        if create:
+            self.cmd_check(cmd)
+
+        if private:
+            self.cmd_info = self.db.get_private_cmd(self.user_info.user_id, cmd, real=True)
+        else:
+            self.cmd_info = self.db.get_cmd(cmd, real=True, full=full)  # alias is handled inside
+
+        if not self.cmd_info and not create:
+            return False
+
+        # build path to retrieve image and voice file
+        if self.cmd_info:
+            if private:
+                self.cur_dir = os.path.join(pic_dir, f"_{user_qq}", self.cmd_info.cmd)
+            else:
+                self.cur_dir = os.path.join(pic_dir, self.cmd_info.cmd)
+        elif create:
+            if private:
+                self.cur_dir = os.path.join(pic_dir, f"_{user_qq}", cmd)
+            else:
+                self.cur_dir = os.path.join(pic_dir, cmd)
+
+        # might be situation that keyword already exists but path is not built
+        if create and not os.path.exists(self.cur_dir) and (cmd_type & CMD_TYPE.PIC):
+            os.makedirs(self.cur_dir, exist_ok=True)
+
+        if not self.cmd_info:
+            if create:
+                self.cmd_info = self.add_alias(cmd, 0, cmd_type, 0, private)
+
+        if create and cmd_type & self.cmd_info.cmd_type == 0:
+            self.db.set_cmd_type(self.cmd_info.cmd_id, cmd_type | self.cmd_info.cmd_type)
+
+        if not self.cmd_info:
+            return False
+
+        # Availability check
+        if (check_active and self.cmd_info.active == 0) or self.user_info.permission < self.cmd_info.level:
+            return False
+
+        return True
+
+    def cmd_check(self, cmd):
+        if len(cmd) > 15:
+            self.reply_type = REPLY_TYPE.TEXT
+            self.reply = "【系统错误: 关键词长度不能大于15个字符!】"
+            raise CmdLengthExceedException
+
+        for keyword in built_in_keywords:
+            if re.match(f"^{keyword}+", cmd):
+                self.reply_type = REPLY_TYPE.TEXT
+                self.reply = "【系统错误: 关键词不能以内建命令作为开头】"
+                raise CmdStartsWithBuiltInKeyException
+
+        if re.match("[\^*$+|]+", cmd):
+            self.reply_type = REPLY_TYPE.TEXT
+            self.reply = "【系统错误: 非法关键词！关键词疑似包含正则表达式】"
+            raise CmdWithRegExpException
 
     def reply_super(self, reply: str):
         self.action.sendFriendText(super_user, reply)
-
-    def check_admin(self, user_qq: int):
-        if user_qq == super_user:
-            return True
-        else:
-            self.reply_type = REPLY_TYPE.TEXT
-            self.reply = "主人说不可以听陌生人的话捏"
-            return False
 
     def enqueue(self, ctx: Union[GroupMsg, FriendMsg]):
         if self.cmd_queue:
@@ -245,15 +294,15 @@ class reply_server:
             elif ctx.content == "对话列表":
                 return self.list_all_cmd(ctx.from_user)
             elif ctx.content == "_scanvoice":
-                return self.scan_voice_dir()
+                return self.scan_voice_dir(ctx.from_user)
             elif re.match("^存.{1,}", ctx.content):
                 return self.handle_save_cmd(ctx.content[1:], ctx.from_user, ctx.pic)
             elif re.match("^_set.{1,}", ctx.content):
                 return self.handle_set_cmd(ctx.content[4:], ctx.from_user, target_qq)
-            elif re.match("^_disable.{1,}", ctx.content):
-                return self.set_cmd_active(ctx.content[8:], 0, ctx.from_user, ctx.from_group)
-            elif re.match("^_enable.{1,}", ctx.content):
-                return self.set_cmd_active(ctx.content[7:], 1, ctx.from_user, ctx.from_group)
+            elif re.match("^禁用.{1,}", ctx.content):
+                return self.set_cmd_active(ctx.content[2:], 0, ctx.from_user, ctx.from_group)
+            elif re.match("^启用.{1,}", ctx.content):
+                return self.set_cmd_active(ctx.content[2:], 1, ctx.from_user, ctx.from_group)
             elif re.match("^_check.{1,}", ctx.content):
                 return self.handle_check_cmd(ctx.content[6:], ctx.from_user)
             elif re.match("^_rename.{1,}", ctx.content):
@@ -283,77 +332,6 @@ class reply_server:
 
         return self.random_reply(arg)
 
-    def cmd_check(self, cmd):
-        if len(cmd) > 15:
-            self.reply_type = REPLY_TYPE.TEXT
-            self.reply = "【系统错误: 关键词长度不能大于15个字符!】"
-            raise CmdLengthExceedException
-
-        for keyword in built_in_keywords:
-            if re.match(f"^{keyword}+", cmd):
-                self.reply_type = REPLY_TYPE.TEXT
-                self.reply = "【系统错误: 关键词不能以内建命令作为开头】"
-                raise CmdStartsWithBuiltInKeyException
-
-        if re.match("[\^*$+|]+", cmd):
-            self.reply_type = REPLY_TYPE.TEXT
-            self.reply = "【系统错误: 非法关键词！关键词疑似包含正则表达式】"
-            raise CmdWithRegExpException
-
-    def checkout(self, cmd: str, user_qq: int, cmd_type=0, create=False, check_active=True, private=False, full=True):
-        # 关键词检索函数, 或是新建关键词, 成功的话会对self.cmd_info赋值
-        # cmd: 关键词
-        # user_qq: 发送关键词的qq号
-        # cmd_type: 创建新关键词(或新类型回复)的类型
-        # create: 关键词不存在的话是否创建
-        # check: 是否检查active
-        # private: 是否为私人关键词检索
-
-        self.user_info = get_user(user_qq)
-        if not self.user_info:
-            return False
-
-        cmd = cmd.upper()  # cmd is case-insensitive
-        if create:
-            self.cmd_check(cmd)
-
-        if private:
-            self.cmd_info = self.db.get_private_cmd(self.user_info.user_id, cmd, real=True)
-        else:
-            self.cmd_info = self.db.get_cmd(cmd, real=True, full=full)  # alias is handled inside
-
-        # build path to retrieve image and voice file
-        if self.cmd_info:
-            if private:
-                self.cur_dir = os.path.join(pic_dir, f"_{user_qq}", self.cmd_info.cmd)
-            else:
-                self.cur_dir = os.path.join(pic_dir, self.cmd_info.cmd)
-        elif create:
-            if private:
-                self.cur_dir = os.path.join(pic_dir, f"_{user_qq}", cmd)
-            else:
-                self.cur_dir = os.path.join(pic_dir, cmd)
-
-        # might be situation that keyword already exists but path is not built
-        if create and not os.path.exists(self.cur_dir) and (cmd_type & CMD_TYPE.PIC):
-            os.makedirs(self.cur_dir, exist_ok=True)
-
-        if not self.cmd_info:
-            if create:
-                self.cmd_info = self.add_alias(cmd, 0, cmd_type, 0, private)
-
-        if create and cmd_type & self.cmd_info.cmd_type == 0:
-            self.db.set_cmd_type(self.cmd_info.cmd_id, cmd_type | self.cmd_info.cmd_type)
-
-        if not self.cmd_info:
-            return False
-
-        # Availability check
-        if (check_active and self.cmd_info.active == 0) or self.user_info.permission < self.cmd_info.level:
-            return False
-
-        return True
-
     def add_alias(self, cmd, parent, reply_type, level, private=False):
         # 这里不会检查alias是否已经存在, 请在调用处检查
         if not private:  # Public cmd alias
@@ -367,6 +345,14 @@ class reply_server:
                 raise CmdLimitExceedException
             else:
                 return self.db.add_private_alias(self.user_info.user_id, max_id + 1, cmd, parent)
+
+    def check_admin(self, user_qq: int):
+        if user_qq == super_user:
+            return True
+        else:
+            self.reply_type = REPLY_TYPE.TEXT
+            self.reply = "主人说不可以听陌生人的话捏"
+            return False
 
     def set_cmd_type(self, cmd, arg):
         if arg is None:
@@ -382,6 +368,7 @@ class reply_server:
     def set_cmd_active(self, cmd, active, user_qq: int, group_qq: int):
         if not self.check_admin(user_qq):
             return
+        cmd = cmd.strip()
         self.reply_type = REPLY_TYPE.TEXT
         if self.checkout(cmd, user_qq, check_active=False):
             if self.cmd_info.cmd_type == CMD_TYPE.PLUGIN and group_qq != "":
@@ -401,6 +388,7 @@ class reply_server:
             self.reply = "关键词【{}】不存在".format(cmd)
 
     def set_cmd_level(self, cmd, level):
+        cmd = cmd.strip()
         if cmd and level:
             level = int(level)
             if self.checkout(cmd, super_user):
@@ -412,7 +400,6 @@ class reply_server:
                 self.reply = "找不到关键词【{}】捏".format(cmd)
 
     def set_permission(self, target_qq: int, permission):
-        print(target_qq)
         if target_qq == 0:
             target_qq = super_user
         if not permission:
@@ -442,74 +429,8 @@ class reply_server:
             self.reply_type = REPLY_TYPE.TEXT
             self.reply = "关键词【{}】不存在".format(cmd)
 
-    def list_cmd(self, user_qq, private=False):
-        output_text = ""
-        output_list = {}
-        user_info = get_user(user_qq)
-        if user_info:
-            if private:
-                cmds = self.db.get_all_private_cmd(user_info.user_id)
-            else:
-                cmds = self.db.get_all_cmd()
-            if cmds is None:
-                return output_text
-            for cmd in cmds:
-                if cmd.active and cmd.level <= user_info.permission:
-                    if cmd.orig_id == 0:
-                        out_str = cmd.cmd
-                        if not private and user_info.permission > 50:  # 权限大于一定值显示每项关键词的回复数量
-                            if CMD_TYPE.PIC & cmd.cmd_type and cmd.sequences[CMD_TYPE.PIC]:
-                                out_str += " 图片回复{}项".format(cmd.sequences[CMD_TYPE.PIC])
-                            if CMD_TYPE.TEXT_TAG & cmd.cmd_type and cmd.sequences[CMD_TYPE.TEXT_TAG]:
-                                out_str += " 文字回复A类{}项".format(cmd.sequences[CMD_TYPE.TEXT_TAG])
-                            if CMD_TYPE.TEXT_FORMAT & cmd.cmd_type and cmd.sequences[CMD_TYPE.TEXT_FORMAT]:
-                                out_str += " 文字回复B类{}项".format(cmd.sequences[CMD_TYPE.TEXT_FORMAT])
-                            if CMD_TYPE.VOICE & cmd.cmd_type and cmd.sequences[CMD_TYPE.VOICE]:
-                                out_str += " 语音回复{}项".format(cmd.sequences[CMD_TYPE.VOICE])
-
-                        output_list[cmd.cmd_id] = out_str
-                    else:  # 处理同义词
-                        parent_id = 0
-                        if cmd.orig_id in output_list:
-                            parent_id = cmd.orig_id
-                        else:
-                            cmd_tmp = cmd
-                            while True:
-                                parent_id = 0
-                                for cmd_p in cmds:
-                                    if cmd_p.cmd_id == cmd_tmp.orig_id:
-                                        cmd_tmp = cmd_p
-                                        if cmd_tmp.orig_id == 0:
-                                            parent_id = cmd_tmp.cmd_id
-                                        else:
-                                            parent_id = -1
-                                        break
-                                if parent_id >= 0:
-                                    break
-
-                        if parent_id in output_list:
-                            output_list[parent_id] += "({})".format(cmd.cmd)
-            for value in output_list.values():
-                if len(value):
-                    output_text += value + "\n"
-
-        return output_text
-
-    def list_all_cmd(self, user_qq):
-        public_cmd = self.list_cmd(user_qq, private=False)
-        private_cmd = self.list_cmd(user_qq, private=True)
-
-        template = f"你可用的公共列表:\n{public_cmd}\n-------------\n你可用的私人列表:\n{private_cmd}"
-        if self.checkout(bot_primary_cmd, user_qq):
-            template += "[PICFLAG]"
-            self.random_pic("")
-            self.reply2 = template
-        else:
-            self.reply_type = REPLY_TYPE.TEXT
-            self.reply = template
-
     def handle_save_cmd(self, cmd, user_qq: int, pic: picObj):
-        logger.info('saving {}'.format(cmd))
+        cmd = cmd.strip()
         if re.match("^回复.{1,}", cmd):
             self.handle_save_reply(cmd[2:], user_qq, pic, private=False)
         elif re.match("^私人回复.{1,}", cmd):  # save private text
@@ -552,120 +473,6 @@ class reply_server:
         self.reply = "你的权限为:【{}】".format(self.user_info.permission)
         self.reply_at = int(user_qq)
 
-    def random_reply(self, arg):
-        reply_info = None
-        if len(arg):
-            if ((CMD_TYPE.TEXT_FORMAT & self.cmd_info.cmd_type) and
-                    self.cmd_info.sequences[CMD_TYPE.TEXT_FORMAT] > 0):
-                return self.random_ftext(arg)
-            elif ((CMD_TYPE.PIC & self.cmd_info.cmd_type) and
-                  self.cmd_info.sequences[CMD_TYPE.PIC] > 0):
-                return self.random_pic(arg)
-
-        cmd_selector = Selector()
-        for cmd_type in CMD_TYPE_LIST:
-            if cmd_type & self.cmd_info.cmd_type and self.cmd_info.sequences[cmd_type] > 0:
-                cmd_selector.add(cmd_type, self.cmd_info.sequences[cmd_type])
-        cmd_type = cmd_selector.shuffle()
-
-        if cmd_type == CMD_TYPE.TEXT_TAG:
-            self.random_text(arg)
-        elif cmd_type == CMD_TYPE.TEXT_FORMAT:
-            self.random_ftext(arg)
-        elif cmd_type == CMD_TYPE.PIC:
-            self.random_pic(arg)
-        elif cmd_type == CMD_TYPE.VOICE:
-            self.random_voice(arg)
-
-    def random_text(self, tag, user_id=0):
-        reply_info = None
-        if len(tag):
-            replies = self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, tag)
-            count = len(replies)
-            if count > 0:
-                ind = random.randint(1, count) - 1
-                reply_info = replies[ind]
-        else:
-            reply_id = random.randint(1, self.cmd_info.sequences[CMD_TYPE.TEXT_TAG])
-            reply_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, reply_id, user_id)
-
-        if reply_info:
-            self.reply = reply_info.reply
-            self.reply_type = REPLY_TYPE.TEXT
-            self.usage_increase(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
-                                CMD_TYPE.TEXT_TAG, reply_info.reply_id)
-        elif user_id:
-            self.reply = "你好像没有设置私人回复捏"
-            self.reply_type = REPLY_TYPE.TEXT
-
-    def random_ftext(self, arg):
-        if len(arg) == 0:
-            return
-        else:
-            reply_id = random.randint(1, self.cmd_info.sequences[CMD_TYPE.TEXT_FORMAT])
-            reply_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_FORMAT, reply_id)
-
-        if reply_info:
-            self.reply = reply_info.reply.format(arg)
-            self.reply_type = REPLY_TYPE.TEXT
-            self.usage_increase(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
-                                CMD_TYPE.TEXT_FORMAT, reply_info.reply_id)
-
-    def _random_pic(self, tag) -> replyInfo:
-        reply_info = None
-        if len(tag):
-            replies = self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.PIC, tag)
-            count = len(replies)
-            if count > 0:
-                ind = random.randint(1, count) - 1
-                reply_info = replies[ind]
-        else:
-            reply_id = random.randint(1, self.cmd_info.sequences[CMD_TYPE.PIC])
-            reply_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.PIC, reply_id)
-        if reply_info:
-            self.usage_increase(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
-                                CMD_TYPE.PIC, reply_info.reply_id)
-
-        return reply_info
-
-    def random_pic(self, arg):
-        if self.use_md5 and self.group_flag:
-            self.random_pic_md5(arg)
-        else:
-            self.random_pic_path(arg)
-
-    def random_pic_md5(self, tag):
-        pic_info = self._random_pic(tag)
-        if pic_info:
-            self.reply = pic_info.md5
-            self.reply_type = REPLY_TYPE.PIC_MD5
-            self.reply2 = pic_info.reply
-
-    def random_pic_path(self, tag):
-        pic_info = self._random_pic(tag)
-        if pic_info:
-            file_name = '{}.{}'.format(pic_info.md5, pic_info.file_type)
-            file_name = file_name.replace('/', 'SLASH')  # avoid path revolving issue
-            file_name = os.path.join(self.cur_dir, file_name)
-            self.reply = file_name
-            self.reply_type = REPLY_TYPE.PIC_PATH
-            self.reply2 = pic_info.reply
-
-    def random_voice(self, tag):
-        voice_info = None
-        if len(tag):
-            voice_info = self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.VOICE, tag)
-        else:
-            reply_id = random.randint(1, self.cmd_info.sequences[CMD_TYPE.VOICE])
-            voice_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.VOICE, reply_id)
-
-        if voice_info:
-            self.usage_increase(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
-                                CMD_TYPE.VOICE, voice_info.reply_id)
-            self.reply_type = REPLY_TYPE.VOICE
-            self.reply = os.path.join(voice_dir,
-                                      "{}/{}.{}".format(self.cmd_info.cmd, voice_info.tag, voice_info.file_type))
-
     @staticmethod
     def get_next_arg(cmd):
         space_index = cmd.find(' ')
@@ -674,26 +481,27 @@ class reply_server:
         else:
             return cmd, None
 
+    # 分离语句中的Keyword tag reply
     @staticmethod
     def save_cmd_parse(cmd):
         cmd = cmd.strip()
         arg = ""
         reply = ""
-        space_index = cmd.find(' ')
-        if space_index > 0:
-            arg = cmd[space_index + 1:]
-            cmd = cmd[0:space_index]
+        hashtag_index = cmd.find('#')
+        if hashtag_index > 0:
+            arg = cmd[hashtag_index + 1:]
+            cmd = cmd[0:hashtag_index]
 
-        if arg == "":
-            space_index = cmd.find('reply')
+        if arg == "":  # 用户没有输入tag
+            space_index = cmd.find(' ')
             if space_index >= 0:
-                reply = reply[space_index + 5:]
+                reply = reply[space_index + 1:]
                 cmd = cmd[:space_index]
                 cmd = cmd.strip()
         else:
-            space_index = arg.find('reply')
+            space_index = arg.find(' ')
             if space_index >= 0:
-                reply = arg[space_index + 5:]
+                reply = arg[space_index + 1:]
                 arg = arg[0:space_index]
                 arg = arg.strip()
 
@@ -835,7 +643,9 @@ class reply_server:
                     record += "{}:{} 已添加\n".format(cmd, file)
         return record
 
-    def scan_voice_dir(self):
+    def scan_voice_dir(self, user_qq:int):
+        if not self.check_admin(user_qq):
+            return
         self.reply_type = REPLY_TYPE.TEXT
         reports = ""
         print("start voice scanning")
@@ -850,6 +660,112 @@ class reply_server:
                 reports += self.scan_voice_sub_dir(cmd, sub_dir)
 
         self.reply = reports
+
+    def random_reply(self, arg):
+        # 先通过Shuffle, 根据权重随机选中回复类型
+        cmd_selector = Selector()
+        for cmd_type in CMD_TYPE_LIST:
+            if cmd_type & self.cmd_info.cmd_type and self.cmd_info.sequences[cmd_type] > 0:
+                cmd_selector.add(cmd_type, self.cmd_info.sequences[cmd_type])
+        cmd_type = cmd_selector.shuffle()
+
+        if cmd_type == CMD_TYPE.TEXT_TAG:
+            self.random_text(arg)
+        elif cmd_type == CMD_TYPE.TEXT_FORMAT:
+            self.random_ftext(arg)
+        elif cmd_type == CMD_TYPE.PIC:
+            self.random_pic(arg)
+        elif cmd_type == CMD_TYPE.VOICE:
+            self.random_voice(arg)
+
+    def random_text(self, tag, user_id=0):
+        reply_info = None
+        if len(tag):
+            replies = self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, tag)
+            count = len(replies)
+            if count > 0:
+                ind = random.randint(1, count) - 1
+                reply_info = replies[ind]
+        else:
+            reply_id = random.randint(1, self.cmd_info.sequences[CMD_TYPE.TEXT_TAG])
+            reply_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, reply_id, user_id)
+
+        if reply_info:
+            self.reply = reply_info.reply
+            self.reply_type = REPLY_TYPE.TEXT
+            self.usage_increase(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
+                                CMD_TYPE.TEXT_TAG, reply_info.reply_id)
+        elif user_id:
+            self.reply = "你好像没有设置私人回复捏"
+            self.reply_type = REPLY_TYPE.TEXT
+
+    def random_ftext(self, arg):
+        if len(arg) == 0:
+            return
+        else:
+            reply_id = random.randint(1, self.cmd_info.sequences[CMD_TYPE.TEXT_FORMAT])
+            reply_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_FORMAT, reply_id)
+
+        if reply_info:
+            self.reply = reply_info.reply.format(arg)
+            self.reply_type = REPLY_TYPE.TEXT
+            self.usage_increase(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
+                                CMD_TYPE.TEXT_FORMAT, reply_info.reply_id)
+
+    def _random_pic(self, tag) -> replyInfo:
+        reply_info = None
+        if len(tag):
+            replies = self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.PIC, tag)
+            count = len(replies)
+            if count > 0:
+                ind = random.randint(1, count) - 1
+                reply_info = replies[ind]
+        else:
+            reply_id = random.randint(1, self.cmd_info.sequences[CMD_TYPE.PIC])
+            reply_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.PIC, reply_id)
+        if reply_info:
+            self.usage_increase(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
+                                CMD_TYPE.PIC, reply_info.reply_id)
+
+        return reply_info
+
+    def random_pic(self, arg):
+        if self.use_md5 and self.group_flag:
+            self.random_pic_md5(arg)
+        else:
+            self.random_pic_path(arg)
+
+    def random_pic_md5(self, tag):
+        pic_info = self._random_pic(tag)
+        if pic_info:
+            self.reply = pic_info.md5
+            self.reply_type = REPLY_TYPE.PIC_MD5
+            self.reply2 = pic_info.reply
+
+    def random_pic_path(self, tag):
+        pic_info = self._random_pic(tag)
+        if pic_info:
+            file_name = '{}.{}'.format(pic_info.md5, pic_info.file_type)
+            file_name = file_name.replace('/', 'SLASH')  # avoid path revolving issue
+            file_name = os.path.join(self.cur_dir, file_name)
+            self.reply = file_name
+            self.reply_type = REPLY_TYPE.PIC_PATH
+            self.reply2 = pic_info.reply
+
+    def random_voice(self, tag):
+        voice_info = None
+        if len(tag):
+            voice_info = self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.VOICE, tag)
+        else:
+            reply_id = random.randint(1, self.cmd_info.sequences[CMD_TYPE.VOICE])
+            voice_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.VOICE, reply_id)
+
+        if voice_info:
+            self.usage_increase(self.user_info.user_id, self.cmd_info.orig_id, self.cmd_info.cmd_id,
+                                CMD_TYPE.VOICE, voice_info.reply_id)
+            self.reply_type = REPLY_TYPE.VOICE
+            self.reply = os.path.join(voice_dir,
+                                      "{}/{}.{}".format(self.cmd_info.cmd, voice_info.tag, voice_info.file_type))
 
     def handle_private_cmd(self):
         reply_info = self.random_private_reply()
@@ -881,9 +797,107 @@ class reply_server:
         self.db.used_inc(user_id, orig_id, cmd_id,
                          cmd_type, reply_id, private=private)
 
+    def list_cmd(self, user_qq, private=False):
+        output_text = ""
+        output_list = {}
+        user_info = get_user(user_qq)
+        if user_info:
+            if private:
+                cmds = self.db.get_all_private_cmd(user_info.user_id)
+            else:
+                cmds = self.db.get_all_cmd()
+            if cmds is None:
+                return output_text
+            for cmd in cmds:
+                if cmd.active and cmd.level <= user_info.permission:
+                    if cmd.orig_id == 0:
+                        out_str = cmd.cmd
+                        if not private and user_info.permission > 50:  # 权限大于一定值显示每项关键词的回复数量
+                            if CMD_TYPE.PIC & cmd.cmd_type and cmd.sequences[CMD_TYPE.PIC]:
+                                out_str += " 图片回复{}项".format(cmd.sequences[CMD_TYPE.PIC])
+                            if CMD_TYPE.TEXT_TAG & cmd.cmd_type and cmd.sequences[CMD_TYPE.TEXT_TAG]:
+                                out_str += " 文字回复A类{}项".format(cmd.sequences[CMD_TYPE.TEXT_TAG])
+                            if CMD_TYPE.TEXT_FORMAT & cmd.cmd_type and cmd.sequences[CMD_TYPE.TEXT_FORMAT]:
+                                out_str += " 文字回复B类{}项".format(cmd.sequences[CMD_TYPE.TEXT_FORMAT])
+                            if CMD_TYPE.VOICE & cmd.cmd_type and cmd.sequences[CMD_TYPE.VOICE]:
+                                out_str += " 语音回复{}项".format(cmd.sequences[CMD_TYPE.VOICE])
+
+                        output_list[cmd.cmd_id] = out_str
+                    else:  # 处理同义词
+                        parent_id = 0
+                        if cmd.orig_id in output_list:
+                            parent_id = cmd.orig_id
+                        else:
+                            cmd_tmp = cmd
+                            while True:
+                                parent_id = 0
+                                for cmd_p in cmds:
+                                    if cmd_p.cmd_id == cmd_tmp.orig_id:
+                                        cmd_tmp = cmd_p
+                                        if cmd_tmp.orig_id == 0:
+                                            parent_id = cmd_tmp.cmd_id
+                                        else:
+                                            parent_id = -1
+                                        break
+                                if parent_id >= 0:
+                                    break
+
+                        if parent_id in output_list:
+                            output_list[parent_id] += "({})".format(cmd.cmd)
+            for value in output_list.values():
+                if len(value):
+                    output_text += value + "\n"
+
+        return output_text
+
+    def list_all_cmd(self, user_qq):
+        public_cmd = self.list_cmd(user_qq, private=False)
+        private_cmd = self.list_cmd(user_qq, private=True)
+
+        template = f"你可用的公共列表:\n{public_cmd}\n-------------\n你可用的私人列表:\n{private_cmd}"
+        if self.checkout(bot_primary_cmd, user_qq):
+            template += "[PICFLAG]"
+            self.random_pic("")
+            self.reply2 = template
+        else:
+            self.reply_type = REPLY_TYPE.TEXT
+            self.reply = template
+
+    def help(self, group_qq: int):
+        cmds = self.db.get_all_cmd(CMD_TYPE.PLUGIN)
+        p_mgr = pluginManager()
+        help_content = "本群已启用功能:\n"
+        content_off = "\n------------\n以下功能已禁用:\n"
+        off = False
+        for cmd in cmds:
+            if cmd.active:
+                if p_mgr.checkout(group_qq=group_qq, cmd_id=cmd.cmd_id):
+                    help_content += f"\u26aa {cmd.cmd}\n"
+                else:
+                    off = True
+                    content_off += f"\u2716 {cmd.cmd}\n"
+
+        help_content += "输入 【帮助+功能】 查看各功能详情"
+        if off:
+            help_content += content_off
+        self.reply_type = REPLY_TYPE.TEXT
+        self.reply = help_content
+
+    @staticmethod
+    def help_self():
+        return "欢迎使用调教助手\n" \
+               "【调教方法】\n" \
+               "发送【存回复 关键词 tag(可选) reply回复（可选）】+【图片(可选)】 存储回复\n" \
+               "也可以发送【存图片回复 关键词 tag(可选) reply回复（可选）】开启图片存储会话\n" \
+               "发送【存同义词 子关键词 父关键词】建立同义词关联\n" \
+               "发送【对话列表】查看可用的关键词\n" \
+               "例:\n" \
+               "存回复色色 reply不许色色！\n" \
+               "存同义词我要色色 色色\n"
+
 
 # 将 plugin 作为特殊cmd使用 type=1000
-class plugin_manager:
+class pluginManager:
     def __init__(self, name="", cmd_id=0):
         self.plugin_name = name.upper()
         self.cmd_id = cmd_id
