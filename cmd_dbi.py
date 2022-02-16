@@ -229,8 +229,8 @@ class cmdDB:
         if user_id > 0:
             arg_list += (user_id, )
         self.db.execute(sql_str, arg_list)
-        row = self.db.fetchall()
-        if row:
+        rows = self.db.fetchall()
+        for row in rows:
             reply_info = replyInfo()
             reply_info.cmd_id = cmd_id
             reply_info.type = reply_type

@@ -159,7 +159,7 @@ _setcmd [关键词] [数字等级]
 例：
 
 ```python
-from replyEngine.deco import plugin_register
+from reply_engine.deco import plugin_register
 
 plugin_name = "插件1"
 plugin_helper = "这是插件1的帮助说明"

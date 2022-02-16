@@ -495,7 +495,7 @@ class replyServer:
         if arg == "":  # 用户没有输入tag
             space_index = cmd.find(' ')
             if space_index >= 0:
-                reply = reply[space_index + 1:]
+                reply = cmd[space_index + 1:]
                 cmd = cmd[:space_index]
                 cmd = cmd.strip()
         else:
@@ -504,7 +504,7 @@ class replyServer:
                 reply = arg[space_index + 1:]
                 arg = arg[0:space_index]
                 arg = arg.strip()
-
+        print(f"{cmd}, {arg}, {reply}")
         return cmd, arg, reply
 
     @staticmethod
@@ -577,14 +577,14 @@ class replyServer:
                     self.db.add_private_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, max_id + 1,
                                               user_id=self.user_info.user_id, reply=reply)
                     self.reply_type = REPLY_TYPE.TEXT
-                    self.reply = "私人回复存储成功，{}({}):{}".format(cmd, tag, reply)
+                    self.reply = "私人回复存储成功：关键词【{}】 标签【{}】 回复【{}】".format(cmd, tag, reply)
                 else:
                     new_reply_id = self.cmd_info.sequences[CMD_TYPE.TEXT_TAG] + 1
                     self.db.add_reply(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, new_reply_id, tag=tag, reply=reply,
                                       user_id=self.user_info.user_id)
                     self.db.set_cmd_seq(self.cmd_info.cmd_id, CMD_TYPE.TEXT_TAG, new_reply_id)
                     self.reply_type = REPLY_TYPE.TEXT
-                    self.reply = "回复存储成功，{}({}):{}".format(cmd, tag, reply)
+                    self.reply = "回复存储成功：关键词【{}】 标签【{}】 回复【{}】".format(cmd, tag, reply)
             else:
                 self.reply_type = REPLY_TYPE.TEXT
                 self.reply = "这个关键词好像用不了捏"
@@ -755,7 +755,11 @@ class replyServer:
     def random_voice(self, tag):
         voice_info = None
         if len(tag):
-            voice_info = self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.VOICE, tag)
+            replies = self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.VOICE, tag)
+            count = len(replies)
+            if count > 0:
+                ind = random.randint(1, count) - 1
+                voice_info = replies[ind]
         else:
             reply_id = random.randint(1, self.cmd_info.sequences[CMD_TYPE.VOICE])
             voice_info = self.db.get_reply(self.cmd_info.cmd_id, CMD_TYPE.VOICE, reply_id)
@@ -887,12 +891,13 @@ class replyServer:
     def help_self():
         return "欢迎使用调教助手\n" \
                "【调教方法】\n" \
-               "发送【存回复 关键词 tag(可选) reply回复（可选）】+【图片(可选)】 存储回复\n" \
-               "也可以发送【存图片回复 关键词 tag(可选) reply回复（可选）】开启图片存储会话\n" \
-               "发送【存同义词 子关键词 父关键词】建立同义词关联\n" \
-               "发送【对话列表】查看可用的关键词\n" \
+               "发送\n【存回复 关键词 #标签 回复】+【图片(可选)】 存储回复\n" \
+               "发送\n【存同义词 子关键词 父关键词】建立同义词关联\n" \
+               "也可以用【存私人回复】来教我只属于你的回复哦\n" \
+               "私人回复@我才可以触发\n" \
+               "发送\n【对话列表】查看可用的关键词\n" \
                "例:\n" \
-               "存回复色色 reply不许色色！\n" \
+               "存回复色色 不许色色！\n" \
                "存同义词我要色色 色色\n"
 
 
