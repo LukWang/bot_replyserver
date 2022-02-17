@@ -408,3 +408,17 @@ class cmdDB:
             return row[0]
         else:
             return None
+
+    def check_db_version(self):
+        try:
+            self.db.execute('select version from db_version')
+            row = self.db.fetchone()
+            if row:
+                return row[0]
+        except sqlite3.DatabaseError:
+            pass
+        return None
+
+    def update_db_version(self, new_version):
+        self.db.execute('update db_version set version = ?', (new_version,))
+        self.conn.commit()

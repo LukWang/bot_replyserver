@@ -13,6 +13,7 @@ from typing import Union
 from .cmd_dbi import cmdDB, cmdInfo, replyInfo, CMD_TYPE
 from .exceptions import *
 from .common_parser import common_group_parser, commonContext, picObj
+from .__version__ import check_version
 
 cur_file_dir = os.path.dirname(os.path.realpath(__file__))
 pic_dir = ""  # 用于存放下载图片的路径
@@ -26,9 +27,11 @@ user_record_level = 1  # 用户行为记录的等级
 # 2: reply_level_record
 
 cmd_search_regexp = True  # 查询关键字时是否使用正则匹配
-bot_primary_cmd = "FUFU"  # bot的主题图库, 用于在生成【对话列表】时挑选显示的图片
+bot_primary_cmd = "bot_theme"  # bot的主题图库, 用于在生成【对话列表】时挑选显示的图片
 
 try:
+    check_version()
+
     with open(cur_file_dir + '/config.json', 'r', encoding='utf-8') as f:
         config = json.load(f)
         super_user = config["super_user"]
@@ -45,7 +48,7 @@ try:
         if "private_limit" in config:
             private_limit = config["user_record_level"]
 except:
-    logger.error('config error')
+    logger.error('配置错误')
     raise
 
 
@@ -288,7 +291,7 @@ class replyServer:
             if jconfig.bot in ctx.at_target:
                 flag_at_me = True
 
-        if flag_at_me or len(ctx.at_target) == 0:
+        if flag_at_me or len(ctx.at_target) == 0:  # 如果有@并且不是@自己，则忽略
             if ctx.content == "帮助":
                 return self.help(ctx.from_group)
             elif ctx.content == "对话列表":
@@ -504,7 +507,6 @@ class replyServer:
                 reply = arg[space_index + 1:]
                 arg = arg[0:space_index]
                 arg = arg.strip()
-        print(f"{cmd}, {arg}, {reply}")
         return cmd, arg, reply
 
     @staticmethod
@@ -536,11 +538,11 @@ class replyServer:
                     file_name = '{}.{}'.format(md5, img_type)
                     file_name = file_name.replace('/', 'SLASH')  # avoid path revolving issue
                     file_path = os.path.join(self.cur_dir, file_name)
-                    logger.warning('Saving image to: {}'.format(file_path))
+                    logger.info('Saving image to: {}'.format(file_path))
                     with open(file_path, 'wb') as img:
                         img.write(res.content)
                 except Exception as e:
-                    logger.warning('Failed to get picture from url:{},{}'.format(url, e))
+                    logger.info('Failed to get picture from url:{},{}'.format(url, e))
                     raise
 
             if private:
@@ -629,7 +631,7 @@ class replyServer:
     def scan_voice_sub_dir(self, cmd, sub_dir):
         record = ""
         for voice_file in os.listdir(sub_dir):
-            print("find:" + voice_file)
+            logger.info("查找到音频文件:" + voice_file)
             if os.path.isfile(os.path.join(sub_dir, voice_file)):
                 file, ext = self.split_file_type(voice_file)
                 if self.db.get_reply_by_tag(self.cmd_info.cmd_id, CMD_TYPE.VOICE, file):
@@ -648,11 +650,11 @@ class replyServer:
             return
         self.reply_type = REPLY_TYPE.TEXT
         reports = ""
-        print("start voice scanning")
+        logger.info("音频扫描开始")
         voice_subs = os.listdir(voice_dir)
         for cmd in voice_subs:
             sub_dir = os.path.join(voice_dir, cmd)
-            print("find:" + sub_dir)
+            logger.info("查找到文件夹:" + sub_dir)
             if os.path.isdir(sub_dir):
                 if not self.checkout(cmd, super_user, cmd_type=CMD_TYPE.VOICE, create=True):
                     self.reply = "命令索引创建/查找失败"

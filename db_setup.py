@@ -11,21 +11,25 @@ except:
     print('Cannot resolve db_schema name from config.json')
     raise
 
-conn = sqlite3.connect(db_schema)
-cur = conn.cursor()
 
-try:
-    with open('db_setup', 'r', encoding='utf-8') as f:
-        for line in f.readlines():
-            line = line.strip()
-            if re.match("^#.*", line):
-                continue
-            print('Executing: ', line)
-            cur.execute(line)
-except:
-    print('Failed to execute DB setup')
-    raise
-conn.commit()
-conn.close()
+def update_db():
+    conn = sqlite3.connect(db_schema)
+    cur = conn.cursor()
 
-print('DB setup finished')
+    try:
+        with open('db_setup', 'r', encoding='utf-8') as f:
+            for line in f.readlines():
+                line = line.strip()
+                if re.match("^#.*", line):
+                    continue
+                print('Executing: ', line)
+                cur.execute(line)
+    except:
+        print('Failed to execute DB setup')
+        raise
+    conn.commit()
+    conn.close()
+
+
+if __name__ == '__main__':
+    update_db()
