@@ -46,7 +46,7 @@ user_record_level  # 用户行为记录的等级
 db_schema          # 要使用的sqlite db文件
 ```
 3. 运行目录下的db_setup.py构建数据库表结构
-4. 配置botoy插件来使用该模块的功能, 你可以使用 [example](https://github.com/LukWang/bot_replyserver/tree/async_server/example/bot_reply_engine) 目录下的插件文件来快速配置
+4. 配置botoy插件来使用该模块的功能, 你可以使用 [example](example/bot_reply_engine) 目录下的插件文件来快速配置
 
 ## 公共命令
 
@@ -159,7 +159,7 @@ _scanvoice
 
 ## 插件管理
 
-通过使用deco/async_deco模块下的plugin_register装饰器, 就可以使用该项目的数据库来管理你的插件了
+通过使用[deco](reply_engine/deco)和[async_deco](reply_engine/async_deco)模块下的plugin_register装饰器, 就可以使用该项目的数据库来管理你的插件了
 
 例：
 
@@ -172,7 +172,7 @@ plugin_helper = "这是插件1的帮助说明"
 def group_msg_receiver(ctx):
     '''你的插件逻辑'''
 ```
-使用该装饰器后, 插件的名字会作为一种特殊的关键词在数据库关键词表中（因此插件名字不能和其他关键词重复）
+使用该装饰器后, 插件的名字会作为一种特殊的关键词存储在数据库关键词表中（因此插件名字不能和其他关键词重复）
 
 super_user可以通过在群聊发送"禁用"和"启用"命令来控制插件在群聊内的开和关
 

@@ -103,7 +103,10 @@ def get_group(group_qq: int):
         if group_info:
             g_group_cache[group_qq] = group_info
         else:
-            db.add_group(group_qq)
+            try:
+                db.add_group(group_qq)
+            except:  # 很可能发生并发插入, 直接忽略
+                pass
             group_info = db.get_group(str(group_qq))
             if group_info:
                 g_group_cache[group_qq] = group_info

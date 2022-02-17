@@ -4,6 +4,7 @@ import re
 
 cur_file_dir = os.path.dirname(os.path.realpath(__file__))
 db_schema = ''
+
 try:
     with open(os.path.join(cur_file_dir, 'config.json'), 'r', encoding='utf-8') as f:
         config = json.load(f)
@@ -14,7 +15,8 @@ except:
 
 
 def update_db():
-    conn = sqlite3.connect(db_schema)
+
+    conn = sqlite3.connect(os.path.join(cur_file_dir, db_schema))
     cur = conn.cursor()
 
     try:
