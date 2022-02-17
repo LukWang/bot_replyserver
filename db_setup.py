@@ -2,9 +2,10 @@ import sqlite3
 import os, json
 import re
 
+cur_file_dir = os.path.dirname(os.path.realpath(__file__))
 db_schema = ''
 try:
-    with open('config.json', 'r', encoding='utf-8') as f:
+    with open(os.path.join(cur_file_dir, 'config.json'), 'r', encoding='utf-8') as f:
         config = json.load(f)
         db_schema = config['db_schema']
 except:
